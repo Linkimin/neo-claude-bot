@@ -1,0 +1,17 @@
+# Secrets
+.env
+.env.local
+
+# Node
+node_modules/
+dist/
+*.log
+
+# State
+*.sqlite
+*.sqlite-journal
+data/
+
+# OS
+Thumbs.db
+.DS_Store
