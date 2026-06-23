@@ -1,0 +1,22 @@
+{
+  "name": "claud-bot",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "spike:hello": "tsx spikes/00-hello.ts",
+    "spike:stream": "tsx spikes/01-stream-shapes.ts",
+    "spike:perms": "tsx spikes/02-permissions.ts",
+    "spike:resume": "tsx spikes/03-resume.ts",
+    "spike:limits": "tsx spikes/04-limits.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "latest",
+    "dotenv": "latest"
+  },
+  "devDependencies": {
+    "tsx": "latest",
+    "typescript": "latest",
+    "@types/node": "latest"
+  }
+}
