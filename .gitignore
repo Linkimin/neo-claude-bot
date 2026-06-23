@@ -11,6 +11,7 @@ dist/
 *.sqlite
 *.sqlite-journal
 data/
+tmp/
 
 # OS
 Thumbs.db
