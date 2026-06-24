@@ -10,6 +10,8 @@ import { isAllowed } from './auth.ts'
 import { truncate, toolUseLine, resultFooter } from './render.ts'
 import { MODELS, EFFORTS, parseSettingAction, settingPatch, renderSettings, checkPin } from './settings.ts'
 import { ApprovalRegistry, renderApprovalRequest, parseApprovalCallback } from './approvals.ts'
+import { SessionStore } from './sessionStore.ts'
+import { renderStatus, type StatusItem } from './status.ts'
 
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
@@ -32,6 +34,7 @@ export function createBot(
   registry: Registry,
   topics: TopicMap,
   settings: SettingsStore,
+  sessions: SessionStore,
 ): Bot {
   const bot = new Bot(config.botToken)
   const approvals = new ApprovalRegistry()
@@ -58,6 +61,31 @@ export function createBot(
   bot.command('setup', async (ctx) => {
     const created = await ensureTopics(bot.api, config.groupId, registry.names(), topics)
     await ctx.reply(created.length ? 'Созданы темы: ' + created.join(', ') : 'Все темы уже существуют.')
+  })
+
+  // /status — обзор проектов: настройки + состояние сессии.
+  bot.command('status', async (ctx) => {
+    const items: StatusItem[] = registry.names().map((p) => {
+      const eff = settings.effective(p, registry.get(p).defaultMode)
+      return {
+        project: p,
+        mode: eff.mode,
+        model: eff.model,
+        effort: eff.effort,
+        hasSession: sessions.getSessionId(p) !== undefined,
+        running: core.isRunning(p),
+      }
+    })
+    await ctx.reply(renderStatus(items), ctx.message?.message_thread_id ? { message_thread_id: ctx.message.message_thread_id } : {})
+  })
+
+  // /new — сбросить сессию проекта текущей темы (следующий промпт начнётся с чистого листа).
+  bot.command('new', async (ctx) => {
+    const threadId = ctx.message?.message_thread_id
+    const project = projectFor(ctx.chat?.type, threadId)
+    if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
+    sessions.clear(project)
+    await ctx.reply(`🆕 ${project}: начнётся новая сессия.`, threadId ? { message_thread_id: threadId } : {})
   })
 
   // /settings — показать панель для проекта текущей темы.

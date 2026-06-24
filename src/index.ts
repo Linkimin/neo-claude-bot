@@ -6,6 +6,7 @@ import { Registry } from './registry.ts'
 import { Core } from './core.ts'
 import { TopicMap } from './topics.ts'
 import { SettingsStore } from './settingsStore.ts'
+import { SessionStore } from './sessionStore.ts'
 import { ensureTopics } from './topicSetup.ts'
 import { createBot } from './bot.ts'
 
@@ -14,14 +15,22 @@ async function main() {
   const registry = Registry.fromFile(resolve('config/projects.json'))
   const topics = TopicMap.load(resolve('data/topics.json'))
   const settings = SettingsStore.load(resolve('data/settings.json'))
-  const core = new Core(registry, settings)
-  const bot = createBot(config, core, registry, topics, settings)
+  const sessions = new SessionStore(resolve('data/claud-bot.sqlite'))
+  const core = new Core(registry, settings, sessions)
+  const bot = createBot(config, core, registry, topics, settings, sessions)
 
   const created = await ensureTopics(bot.api, config.groupId, registry.names(), topics)
   if (created.length) console.log('Созданы темы:', created.join(', '))
 
-  // @grammyjs/runner — конкурентная обработка апдейтов.
-  // Нужно, чтобы нажатие кнопки апрува обрабатывалось, пока обработчик промпта ждёт решение.
+  // Меню команд бота (видно в UI Telegram — печатать руками не нужно).
+  await bot.api.setMyCommands([
+    { command: 'status', description: 'Статус проектов и сессий' },
+    { command: 'settings', description: 'Настройки: модель / effort / режим' },
+    { command: 'new', description: 'Новая сессия в этой теме' },
+    { command: 'setup', description: 'Создать темы по проектам' },
+    { command: 'start', description: 'Помощь' },
+  ])
+
   console.log('Бот запускается (concurrent runner)… группа:', config.groupId, '· user:', config.allowedUserId)
   run(bot)
 }
