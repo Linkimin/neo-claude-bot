@@ -68,4 +68,8 @@ export class LimitsStore {
   removeQueue(id: number): void {
     this.db.prepare('DELETE FROM limit_queue WHERE id = ?').run(id)
   }
+
+  close(): void {
+    this.db.close()
+  }
 }

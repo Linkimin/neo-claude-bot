@@ -10,10 +10,13 @@
     "spike:resume": "tsx spikes/03-resume.ts",
     "spike:limits": "tsx spikes/04-limits.ts",
     "test": "vitest run",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "install-service": "powershell -ExecutionPolicy Bypass -File scripts/install-service.ps1",
+    "uninstall-service": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-service.ps1"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "latest",
+    "@grammyjs/auto-retry": "^2.0.2",
     "@grammyjs/runner": "^2.0.3",
     "better-sqlite3": "^12.11.1",
     "dotenv": "latest",
