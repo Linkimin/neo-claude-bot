@@ -6,6 +6,6 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 Register-ScheduledTask -TaskName 'ClaudBot' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-Write-Host 'Служба ClaudBot установлена (старт при загрузке, рестарт каждую 1 мин при сбое).'
-Write-Host 'Запустить сейчас:  Start-ScheduledTask -TaskName ClaudBot'
-Write-Host 'Лог:               data\bot.log'
+Write-Host 'ClaudBot service installed (starts at boot, restarts every 1 min on failure).'
+Write-Host 'Start now:  Start-ScheduledTask -TaskName ClaudBot'
+Write-Host 'Log file:   data\bot.log'
