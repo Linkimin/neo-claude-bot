@@ -47,4 +47,8 @@ export class SessionStore {
       .prepare('SELECT project, session_id AS sessionId, updated_at AS updatedAt FROM sessions ORDER BY project')
       .all() as SessionRow[]
   }
+
+  close(): void {
+    this.db.close()
+  }
 }
