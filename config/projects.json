@@ -1,3 +1,4 @@
 [
-  { "name": "spike", "dir": "tmp/spike-project", "defaultMode": "bypassPermissions" }
+  { "name": "spike", "dir": "tmp/spike-project", "defaultMode": "bypassPermissions" },
+  { "name": "game", "dir": "tmp/game", "defaultMode": "acceptEdits" }
 ]
