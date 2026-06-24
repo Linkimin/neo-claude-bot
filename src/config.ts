@@ -1,6 +1,7 @@
 export interface AppConfig {
   botToken: string
   allowedUserId: number
+  groupId: number
 }
 
 // Принимает env-словарь явно (тестируемо); в проде передаём process.env.
@@ -14,5 +15,11 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     throw new Error('Missing or invalid TELEGRAM_USER_ID (must be an integer)')
   }
 
-  return { botToken, allowedUserId }
+  const rawGroup = env.TELEGRAM_GROUP_ID
+  const groupId = Number(rawGroup)
+  if (!rawGroup || !Number.isInteger(groupId)) {
+    throw new Error('Missing or invalid TELEGRAM_GROUP_ID (must be an integer)')
+  }
+
+  return { botToken, allowedUserId, groupId }
 }
