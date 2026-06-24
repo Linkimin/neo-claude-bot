@@ -20,7 +20,7 @@ function settingsKeyboard(): InlineKeyboard {
   kb.row()
   for (const e of EFFORTS) kb.text(e, `set:effort:${e}`)
   kb.row()
-  kb.text('режим: accept edits', 'set:mode:acceptEdits').text('режим: default', 'set:mode:default')
+  kb.text('accept edits', 'set:mode:acceptEdits').text('default', 'set:mode:default').text('auto 🔒', 'mode:auto-locked')
   return kb
 }
 
@@ -85,6 +85,11 @@ export function createBot(
 
   // Нажатия кнопок настроек.
   bot.on('callback_query:data', async (ctx) => {
+    // Кнопка auto не переключает напрямую — auto только под PIN через команду.
+    if (ctx.callbackQuery.data === 'mode:auto-locked') {
+      await ctx.answerCallbackQuery({ text: 'Включить auto: отправь команду /auto <PIN>', show_alert: true })
+      return
+    }
     const action = parseSettingAction(ctx.callbackQuery.data)
     const patch = action ? settingPatch(action) : null
     const threadId = ctx.callbackQuery.message?.message_thread_id
