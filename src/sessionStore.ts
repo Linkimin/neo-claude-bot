@@ -12,6 +12,7 @@ export class SessionStore {
 
   constructor(path: string) {
     this.db = new Database(path)
+    this.db.pragma('busy_timeout = 5000')
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         project TEXT PRIMARY KEY,
