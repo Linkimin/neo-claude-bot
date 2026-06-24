@@ -14,6 +14,9 @@ import { ApprovalRegistry, renderApprovalRequest, parseApprovalCallback } from '
 import { renderStatus, type StatusItem } from './status.ts'
 import { LimitsStore, type QueueItem } from './limitsStore.ts'
 import { classifyLimit, formatReset, renderLimits } from './limits.ts'
+import { RunStore } from './runStore.ts'
+import { parseRecoveryCallback } from './recovery.ts'
+import { log } from './logger.ts'
 
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
@@ -38,9 +41,15 @@ export function createBot(
   settings: SettingsStore,
   sessions: SessionStore,
   limits: LimitsStore,
+  runs: RunStore,
 ): Bot {
   const bot = new Bot(config.botToken)
   const approvals = new ApprovalRegistry()
+
+  bot.catch((err) => {
+    log.error('bot.catch:', err.error instanceof Error ? err.error.message : String(err.error))
+    void bot.api.sendMessage(config.allowedUserId, '⚠️ Ошибка обработки апдейта: ' + (err.error instanceof Error ? err.error.message : String(err.error))).catch(() => {})
+  })
 
   const projectFor = (chatType: string | undefined, threadId: number | undefined) =>
     resolveProject({
@@ -66,6 +75,8 @@ export function createBot(
   async function executeRun(chatId: number, threadId: number | undefined, project: string, prompt: string): Promise<void> {
     const opts = threadId ? { message_thread_id: threadId } : {}
     const send = (text: string) => bot.api.sendMessage(chatId, text, opts)
+    const runId = runs.start(project, chatId, threadId ?? null, prompt)
+    try {
 
     const onApproval = async (toolName: string, input: unknown) => {
       const { id, promise } = approvals.register()
@@ -122,7 +133,7 @@ export function createBot(
           if (answerBuf) await renderAnswer(true)
           if (!limitBlocked) await send(resultFooter(ev))
         } else if (ev.kind === 'init') {
-          console.log('[run]', project, 'model=', ev.model, 'mode=', ev.mode)
+          log.info('[run]', project, 'model=', ev.model, 'mode=', ev.mode)
         } else if (ev.kind === 'rate_limit') {
           limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
           if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
@@ -139,6 +150,9 @@ export function createBot(
       const id = limits.enqueue(base)
       await send(`⛔ Лимиты закончились.\nВосстановление ${formatReset(blockedResetsAt, Date.now())}.\nПродолжу запрос автоматически.`)
       scheduleContinue({ id, ...base })
+    }
+    } finally {
+      runs.remove(runId)
     }
   }
 
@@ -218,6 +232,18 @@ export function createBot(
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data
 
+    const rec = parseRecoveryCallback(data)
+    if (rec) {
+      const r = runs.get(rec.id)
+      if (!r) { await ctx.answerCallbackQuery('Запрос уже неактивен'); return }
+      runs.remove(rec.id)
+      await ctx.editMessageText('Восстановление: ' + (rec.action === 'continue' ? '▶️ продолжаю' : rec.action === 'restart' ? '🔄 заново' : '✖️ отменено')).catch(() => {})
+      await ctx.answerCallbackQuery('Ок')
+      if (rec.action === 'continue') void executeRun(r.chatId, r.threadId ?? undefined, r.project, 'Продолжи прерванную задачу, которую не успел закончить.')
+      else if (rec.action === 'restart') void executeRun(r.chatId, r.threadId ?? undefined, r.project, r.prompt)
+      return
+    }
+
     const appr = parseApprovalCallback(data)
     if (appr) {
       const ok = approvals.resolve(appr.id, appr.decision)
@@ -257,6 +283,19 @@ export function createBot(
 
   // На старте — переочередь незавершённых авто-продолжений из БД.
   for (const item of limits.listQueue()) scheduleContinue(item)
+
+  // На старте — восстановление прерванных прогонов (кнопками).
+  for (const r of runs.listInterrupted()) {
+    const kb = new InlineKeyboard()
+      .text('▶️ Продолжить', `recover:continue:${r.id}`)
+      .text('🔄 Заново', `recover:restart:${r.id}`)
+      .text('✖️ Отмена', `recover:cancel:${r.id}`)
+    void bot.api.sendMessage(
+      r.chatId,
+      `⚠️ Запрос в «${r.project}» прервался рестартом:\n«${r.prompt.slice(0, 200)}»\nЧто делать?`,
+      { reply_markup: kb, ...(r.threadId ? { message_thread_id: r.threadId } : {}) },
+    ).catch(() => {})
+  }
 
   return bot
 }
