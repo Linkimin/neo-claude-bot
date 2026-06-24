@@ -18,7 +18,7 @@ describe('Core.handle', () => {
     let seen: any
     const core = new Core(registry, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
     const got: RunnerEvent[] = []
-    await core.handle('spike', 'do it', (e) => got.push(e))
+    await core.handle('spike', 'do it', (e) => { got.push(e) })
 
     expect(seen.cwd).toBe('tmp/spike-project')
     expect(seen.prompt).toBe('do it')

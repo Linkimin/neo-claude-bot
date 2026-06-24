@@ -24,28 +24,58 @@ export function createBot(config: AppConfig, core: Core): Bot {
     const prompt = ctx.message.text
     if (prompt.startsWith('/')) return // прочие команды игнорируем в M1
 
+    // «⏳ работаю…» — мгновенный отклик; удаляем, как только пойдёт реальный вывод.
     const status = await ctx.reply('⏳ работаю…')
-    let buffer = ''
+    let statusDropped = false
+    const dropStatus = async () => {
+      if (statusDropped) return
+      statusDropped = true
+      await ctx.api.deleteMessage(ctx.chat.id, status.message_id).catch(() => {})
+    }
+
+    // Текущий «пузырь» ответа: новое сообщение, которое дозаполняется по мере стрима.
+    // Сбрасывается на каждом действии с инструментом, чтобы ответ всегда шёл ПОД заметками.
+    let answerMsgId: number | null = null
+    let answerBuf = ''
     let lastEdit = 0
 
-    const flush = async (final: boolean) => {
-      const now = Date.now()
-      if (!final && now - lastEdit < 1500) return // троттлинг edit'ов Telegram
-      lastEdit = now
-      const text = truncate(buffer || '…', TG_LIMIT)
-      await ctx.api.editMessageText(status.chat.id, status.message_id, text).catch(() => {})
+    const renderAnswer = async (force: boolean) => {
+      const text = truncate(answerBuf || '…', TG_LIMIT)
+      if (answerMsgId === null) {
+        const m = await ctx.reply(text)
+        answerMsgId = m.message_id
+        lastEdit = Date.now()
+      } else {
+        const now = Date.now()
+        if (!force && now - lastEdit < 1500) return // троттлинг edit'ов Telegram
+        lastEdit = now
+        await ctx.api.editMessageText(ctx.chat.id, answerMsgId, text).catch(() => {})
+      }
     }
 
     try {
-      await core.handle(DEFAULT_PROJECT, prompt, (ev) => {
-        if (ev.kind === 'assistant_text') { buffer += ev.text; void flush(false) }
-        else if (ev.kind === 'tool_use') { void ctx.reply(toolUseLine(ev.name, ev.input)) }
-        else if (ev.kind === 'result') { buffer += '\n\n' + resultFooter(ev); void flush(true) }
-        else if (ev.kind === 'rate_limit') { console.log('[rate_limit]', ev.rateLimitType, ev.utilization, 'resetsAt', ev.resetsAt) }
+      await core.handle(DEFAULT_PROJECT, prompt, async (ev) => {
+        if (ev.kind === 'assistant_text') {
+          await dropStatus()
+          answerBuf += ev.text
+          await renderAnswer(false)
+        } else if (ev.kind === 'tool_use') {
+          await dropStatus()
+          if (answerMsgId !== null) await renderAnswer(true) // дофиксировать текущий ответ
+          answerMsgId = null
+          answerBuf = ''
+          await ctx.reply(toolUseLine(ev.name, ev.input))
+        } else if (ev.kind === 'result') {
+          if (answerBuf) await renderAnswer(true) // дофиксировать текущий пузырь, если есть текст
+          await ctx.reply(resultFooter(ev)) // футер — отдельным сообщением в самом низу
+        } else if (ev.kind === 'rate_limit') {
+          console.log('[rate_limit]', ev.rateLimitType, ev.utilization, 'resetsAt', ev.resetsAt)
+        }
         // status/init — в M1 не показываем
       })
-      await flush(true)
+      await dropStatus()
     } catch (err) {
+      await dropStatus()
       await ctx.reply('❌ Сбой: ' + (err instanceof Error ? err.message : String(err)))
     }
   })
