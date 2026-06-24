@@ -8,15 +8,19 @@
     "spike:stream": "tsx spikes/01-stream-shapes.ts",
     "spike:perms": "tsx spikes/02-permissions.ts",
     "spike:resume": "tsx spikes/03-resume.ts",
-    "spike:limits": "tsx spikes/04-limits.ts"
+    "spike:limits": "tsx spikes/04-limits.ts",
+    "test": "vitest run",
+    "start": "tsx src/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "latest",
-    "dotenv": "latest"
+    "dotenv": "latest",
+    "grammy": "^1.44.0"
   },
   "devDependencies": {
+    "@types/node": "latest",
     "tsx": "latest",
     "typescript": "latest",
-    "@types/node": "latest"
+    "vitest": "^4.1.9"
   }
 }
