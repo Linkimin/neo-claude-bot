@@ -1,18 +1,46 @@
-import { Bot } from 'grammy'
+import { Bot, InlineKeyboard } from 'grammy'
 import type { AppConfig } from './config.ts'
 import { Core } from './core.ts'
 import { Registry } from './registry.ts'
 import { TopicMap } from './topics.ts'
+import { SettingsStore } from './settingsStore.ts'
 import { ensureTopics } from './topicSetup.ts'
 import { resolveProject } from './route.ts'
 import { isAllowed } from './auth.ts'
 import { truncate, toolUseLine, resultFooter } from './render.ts'
+import { MODELS, EFFORTS, parseSettingAction, settingPatch, renderSettings, checkPin } from './settings.ts'
 
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
 
-export function createBot(config: AppConfig, core: Core, registry: Registry, topics: TopicMap): Bot {
+// Строит клавиатуру настроек: модели, effort, режимы (без auto — он через /auto <PIN>).
+function settingsKeyboard(): InlineKeyboard {
+  const kb = new InlineKeyboard()
+  for (const m of MODELS) kb.text(m.label, `set:model:${m.id}`)
+  kb.row()
+  for (const e of EFFORTS) kb.text(e, `set:effort:${e}`)
+  kb.row()
+  kb.text('accept edits', 'set:mode:acceptEdits').text('default', 'set:mode:default').text('auto 🔒', 'mode:auto-locked')
+  return kb
+}
+
+export function createBot(
+  config: AppConfig,
+  core: Core,
+  registry: Registry,
+  topics: TopicMap,
+  settings: SettingsStore,
+): Bot {
   const bot = new Bot(config.botToken)
+
+  // Резолв проекта по контексту любого апдейта (сообщение или callback).
+  const projectFor = (chatType: string | undefined, threadId: number | undefined) =>
+    resolveProject({
+      chatType: chatType ?? 'private',
+      threadId,
+      defaultProject: DEFAULT_PROJECT,
+      projectForThread: (id) => topics.projectForThread(id),
+    })
 
   // Auth: пропускаем только разрешённого пользователя. В группах чужих игнорируем молча.
   bot.use(async (ctx, next) => {
@@ -21,28 +49,66 @@ export function createBot(config: AppConfig, core: Core, registry: Registry, top
   })
 
   bot.command('start', (ctx) =>
-    ctx.reply('Привет! Пиши промпт в теме проекта. Команда /setup создаст недостающие темы.'),
+    ctx.reply('Привет! Пиши промпт в теме проекта. /settings — настройки, /auto <PIN> — включить auto, /setup — создать темы.'),
   )
 
-  // /setup — создать недостающие темы в группе по реестру.
   bot.command('setup', async (ctx) => {
     const created = await ensureTopics(bot.api, config.groupId, registry.names(), topics)
     await ctx.reply(created.length ? 'Созданы темы: ' + created.join(', ') : 'Все темы уже существуют.')
   })
 
+  // /settings — показать панель для проекта текущей темы.
+  bot.command('settings', async (ctx) => {
+    const threadId = ctx.message?.message_thread_id
+    const project = projectFor(ctx.chat?.type, threadId)
+    if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
+    const eff = settings.effective(project, registry.get(project).defaultMode)
+    await ctx.reply(`Проект: ${project}\n${renderSettings(eff)}`, {
+      reply_markup: settingsKeyboard(),
+      ...(threadId ? { message_thread_id: threadId } : {}),
+    })
+  })
+
+  // /auto <PIN> — включить bypass-режим для проекта текущей темы.
+  bot.command('auto', async (ctx) => {
+    const threadId = ctx.message?.message_thread_id
+    const project = projectFor(ctx.chat?.type, threadId)
+    if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
+    const arg = (ctx.match ?? '').toString()
+    if (!checkPin(arg, config.pin)) {
+      await ctx.reply('❌ Неверный PIN. Использование: /auto <PIN>', threadId ? { message_thread_id: threadId } : {})
+      return
+    }
+    settings.set(project, { mode: 'bypassPermissions' })
+    await ctx.reply(`🔴 ${project}: режим auto (bypass) включён.`, threadId ? { message_thread_id: threadId } : {})
+  })
+
+  // Нажатия кнопок настроек.
+  bot.on('callback_query:data', async (ctx) => {
+    // Кнопка auto не переключает напрямую — auto только под PIN через команду.
+    if (ctx.callbackQuery.data === 'mode:auto-locked') {
+      await ctx.answerCallbackQuery({ text: 'Включить auto: отправь команду /auto <PIN>', show_alert: true })
+      return
+    }
+    const action = parseSettingAction(ctx.callbackQuery.data)
+    const patch = action ? settingPatch(action) : null
+    const threadId = ctx.callbackQuery.message?.message_thread_id
+    const project = projectFor(ctx.callbackQuery.message?.chat.type, threadId)
+    if (!patch || !project) { await ctx.answerCallbackQuery('Не удалось применить'); return }
+
+    settings.set(project, patch)
+    const eff = settings.effective(project, registry.get(project).defaultMode)
+    // .catch — на случай «message is not modified» (повторный тап той же кнопки).
+    await ctx.editMessageText(`Проект: ${project}\n${renderSettings(eff)}`, { reply_markup: settingsKeyboard() }).catch(() => {})
+    await ctx.answerCallbackQuery('Сохранено')
+  })
+
   bot.on('message:text', async (ctx) => {
     const prompt = ctx.message.text
-    if (prompt.startsWith('/')) return // прочие команды игнорируем
+    if (prompt.startsWith('/')) return
 
     const threadId = ctx.message.message_thread_id
-    const projectName = resolveProject({
-      chatType: ctx.chat.type,
-      threadId,
-      defaultProject: DEFAULT_PROJECT,
-      projectForThread: (id) => topics.projectForThread(id),
-    })
-
-    // Хелпер: ответ уходит в ту же тему, откуда пришёл (или в личку).
+    const projectName = projectFor(ctx.chat.type, threadId)
     const send = (text: string) => ctx.reply(text, threadId ? { message_thread_id: threadId } : {})
 
     if (projectName === null) {
@@ -90,6 +156,8 @@ export function createBot(config: AppConfig, core: Core, registry: Registry, top
         } else if (ev.kind === 'result') {
           if (answerBuf) await renderAnswer(true)
           await send(resultFooter(ev))
+        } else if (ev.kind === 'init') {
+          console.log('[run]', projectName, 'model=', ev.model, 'mode=', ev.mode)
         } else if (ev.kind === 'rate_limit') {
           console.log('[rate_limit]', ev.rateLimitType, ev.utilization, 'resetsAt', ev.resetsAt)
         }
