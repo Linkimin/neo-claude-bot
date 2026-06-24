@@ -1,6 +1,6 @@
 import { Registry } from './registry.ts'
 import { SettingsStore } from './settingsStore.ts'
-import { runPrompt, type RunParams } from './runner.ts'
+import { runPrompt, type RunParams, type ApprovalFn } from './runner.ts'
 import { EFFORT_THINKING } from './settings.ts'
 import type { RunnerEvent } from './events.ts'
 
@@ -16,7 +16,12 @@ export class Core {
     private readonly run: RunFn = (p) => runPrompt(p),
   ) {}
 
-  async handle(projectName: string, prompt: string, onEvent: (e: RunnerEvent) => void | Promise<void>): Promise<void> {
+  async handle(
+    projectName: string,
+    prompt: string,
+    onEvent: (e: RunnerEvent) => void | Promise<void>,
+    onApproval?: ApprovalFn,
+  ): Promise<void> {
     const project = this.registry.get(projectName) // бросит при неизвестном проекте
     const eff = this.settings.effective(projectName, project.defaultMode)
     const resume = this.lastSession.get(projectName)
@@ -28,6 +33,7 @@ export class Core {
       model: eff.model,
       maxThinkingTokens: EFFORT_THINKING[eff.effort],
       resume,
+      onApproval,
     })) {
       if (ev.kind === 'init') this.lastSession.set(projectName, ev.sessionId)
       else if (ev.kind === 'result') this.lastSession.set(projectName, ev.sessionId)

@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { resolve } from 'node:path'
+import { run } from '@grammyjs/runner'
 import { loadConfig } from './config.ts'
 import { Registry } from './registry.ts'
 import { Core } from './core.ts'
@@ -19,8 +20,10 @@ async function main() {
   const created = await ensureTopics(bot.api, config.groupId, registry.names(), topics)
   if (created.length) console.log('Созданы темы:', created.join(', '))
 
-  console.log('Бот запускается (long-polling)… группа:', config.groupId, '· user:', config.allowedUserId)
-  await bot.start()
+  // @grammyjs/runner — конкурентная обработка апдейтов.
+  // Нужно, чтобы нажатие кнопки апрува обрабатывалось, пока обработчик промпта ждёт решение.
+  console.log('Бот запускается (concurrent runner)… группа:', config.groupId, '· user:', config.allowedUserId)
+  run(bot)
 }
 
 main().catch((e) => { console.error('FATAL:', e); process.exit(1) })

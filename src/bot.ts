@@ -9,9 +9,11 @@ import { resolveProject } from './route.ts'
 import { isAllowed } from './auth.ts'
 import { truncate, toolUseLine, resultFooter } from './render.ts'
 import { MODELS, EFFORTS, parseSettingAction, settingPatch, renderSettings, checkPin } from './settings.ts'
+import { ApprovalRegistry, renderApprovalRequest, parseApprovalCallback } from './approvals.ts'
 
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
+const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000 // авто-отклонение, если не ответили за 5 минут
 
 // Строит клавиатуру настроек: модели, effort, режимы (без auto — он через /auto <PIN>).
 function settingsKeyboard(): InlineKeyboard {
@@ -32,6 +34,7 @@ export function createBot(
   settings: SettingsStore,
 ): Bot {
   const bot = new Bot(config.botToken)
+  const approvals = new ApprovalRegistry()
 
   // Резолв проекта по контексту любого апдейта (сообщение или callback).
   const projectFor = (chatType: string | undefined, threadId: number | undefined) =>
@@ -83,14 +86,26 @@ export function createBot(
     await ctx.reply(`🔴 ${project}: режим auto (bypass) включён.`, threadId ? { message_thread_id: threadId } : {})
   })
 
-  // Нажатия кнопок настроек.
+  // Диспетчер нажатий: апрувы → кнопка auto → настройки.
   bot.on('callback_query:data', async (ctx) => {
-    // Кнопка auto не переключает напрямую — auto только под PIN через команду.
-    if (ctx.callbackQuery.data === 'mode:auto-locked') {
+    const data = ctx.callbackQuery.data
+
+    // 1) Апрувы.
+    const appr = parseApprovalCallback(data)
+    if (appr) {
+      const ok = approvals.resolve(appr.id, appr.decision)
+      await ctx.answerCallbackQuery(ok ? (appr.decision === 'approve' ? '✔ Разрешено' : '✖ Отклонено') : 'Запрос уже неактивен')
+      return
+    }
+
+    // 2) Кнопка auto — только подсказка (auto под PIN через команду).
+    if (data === 'mode:auto-locked') {
       await ctx.answerCallbackQuery({ text: 'Включить auto: отправь команду /auto <PIN>', show_alert: true })
       return
     }
-    const action = parseSettingAction(ctx.callbackQuery.data)
+
+    // 3) Настройки (модель/effort/режим).
+    const action = parseSettingAction(data)
     const patch = action ? settingPatch(action) : null
     const threadId = ctx.callbackQuery.message?.message_thread_id
     const project = projectFor(ctx.callbackQuery.message?.chat.type, threadId)
@@ -110,6 +125,22 @@ export function createBot(
     const threadId = ctx.message.message_thread_id
     const projectName = projectFor(ctx.chat.type, threadId)
     const send = (text: string) => ctx.reply(text, threadId ? { message_thread_id: threadId } : {})
+
+    // Колбэк апрува: рисует кнопки в теме и ждёт решение (или таймаут → отклонение).
+    const onApproval = async (toolName: string, input: unknown) => {
+      const { id, promise } = approvals.register()
+      const kb = new InlineKeyboard().text('✔ Разрешить', `appr:approve:${id}`).text('✖ Отклонить', `appr:deny:${id}`)
+      const m = await ctx.reply(renderApprovalRequest(toolName, input), {
+        reply_markup: kb,
+        ...(threadId ? { message_thread_id: threadId } : {}),
+      })
+      const timer = setTimeout(() => { approvals.resolve(id, 'deny') }, APPROVAL_TIMEOUT_MS)
+      const decision = await promise
+      clearTimeout(timer)
+      const verdict = decision.allow ? '✅ Разрешено' : '🚫 ' + decision.message
+      await ctx.api.editMessageText(m.chat.id, m.message_id, renderApprovalRequest(toolName, input) + '\n' + verdict).catch(() => {})
+      return decision
+    }
 
     if (projectName === null) {
       await send('Эта тема не привязана к проекту. Запусти /setup или пиши в теме проекта.')
@@ -161,7 +192,7 @@ export function createBot(
         } else if (ev.kind === 'rate_limit') {
           console.log('[rate_limit]', ev.rateLimitType, ev.utilization, 'resetsAt', ev.resetsAt)
         }
-      })
+      }, onApproval)
       await dropStatus()
     } catch (err) {
       await dropStatus()

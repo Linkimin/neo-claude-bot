@@ -52,4 +52,13 @@ describe('Core.handle', () => {
     const core = new Core(registry, settings, fakeRun([]))
     await expect(core.handle('nope', 'x', () => {})).rejects.toThrow(/unknown project/)
   })
+
+  it('passes onApproval through to the runner', async () => {
+    let seen: any
+    const settings = SettingsStore.load(TMP)
+    const core = new Core(registry, settings, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
+    const onApproval = async () => ({ allow: true as const })
+    await core.handle('spike', 'do it', () => {}, onApproval)
+    expect(seen.onApproval).toBe(onApproval)
+  })
 })
