@@ -7,6 +7,8 @@ export interface RunParams {
   cwd: string
   prompt: string
   permissionMode: PermissionMode
+  model?: string
+  maxThinkingTokens?: number
   resume?: string
 }
 
@@ -22,6 +24,8 @@ export async function* runPrompt(p: RunParams, q: QueryFn = query): AsyncGenerat
       allowDangerouslySkipPermissions: p.permissionMode === 'bypassPermissions',
       tools: { type: 'preset', preset: 'claude_code' },
       settingSources: ['project'],
+      ...(p.model ? { model: p.model } : {}),
+      ...(p.maxThinkingTokens ? { maxThinkingTokens: p.maxThinkingTokens } : {}),
       ...(p.resume ? { resume: p.resume } : {}),
     },
   })
