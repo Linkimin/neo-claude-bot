@@ -18,6 +18,7 @@
     "@anthropic-ai/claude-agent-sdk": "latest",
     "@grammyjs/auto-retry": "^2.0.2",
     "@grammyjs/runner": "^2.0.3",
+    "@musistudio/claude-code-router": "^2.0.0",
     "better-sqlite3": "^12.11.1",
     "dotenv": "latest",
     "grammy": "^1.44.0"
