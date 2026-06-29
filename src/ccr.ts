@@ -1,5 +1,22 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { log } from './logger.ts'
+
+// Генерирует ~/.claude-code-router/config.json под routerai из конфига бота.
+export function ensureCcrConfig(opts: { baseUrl: string; apiKey: string; port: number; models: string[]; defaultModel: string }): void {
+  const dir = join(homedir(), '.claude-code-router')
+  mkdirSync(dir, { recursive: true })
+  const cfg = {
+    PORT: opts.port,
+    Providers: [
+      { name: 'routerai', api_base_url: opts.baseUrl.replace(/\/$/, '') + '/chat/completions', api_key: opts.apiKey, models: opts.models },
+    ],
+    Router: { default: `routerai,${opts.defaultModel}` },
+  }
+  writeFileSync(join(dir, 'config.json'), JSON.stringify(cfg, null, 2))
+}
 
 // Поднимает локальный CCR-прокси как дочерний процесс и перезапускает при выходе.
 export class CcrProcess {
