@@ -30,3 +30,25 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ ...base, SETTINGS_PIN: undefined })).toThrow(/SETTINGS_PIN/)
   })
 })
+
+describe('loadConfig fallback', () => {
+  const base = { TELEGRAM_BOT_TOKEN: 'abc', TELEGRAM_USER_ID: '1', TELEGRAM_GROUP_ID: '-1', SETTINGS_PIN: '1' }
+
+  it('fallback is null when ROUTERAI_API_KEY absent', () => {
+    expect(loadConfig(base).fallback).toBeNull()
+  })
+
+  it('builds fallback config when key + base url present', () => {
+    const cfg = loadConfig({ ...base, ROUTERAI_API_KEY: 'k', ROUTERAI_BASE_URL: 'https://routerai.ru/api/v1', CCR_PORT: '3456' })
+    expect(cfg.fallback).toEqual({ apiKey: 'k', baseUrl: 'https://routerai.ru/api/v1', ccrPort: 3456, ccrUrl: 'http://localhost:3456' })
+  })
+
+  it('throws when key present but base url missing', () => {
+    expect(() => loadConfig({ ...base, ROUTERAI_API_KEY: 'k' })).toThrow(/ROUTERAI_BASE_URL/)
+  })
+
+  it('defaults ccrPort to 3456', () => {
+    const cfg = loadConfig({ ...base, ROUTERAI_API_KEY: 'k', ROUTERAI_BASE_URL: 'u' })
+    expect(cfg.fallback!.ccrPort).toBe(3456)
+  })
+})

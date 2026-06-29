@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { PermissionMode } from './registry.ts'
-import { DEFAULT_MODEL, DEFAULT_EFFORT, type ProjectSettings } from './settings.ts'
+import { DEFAULT_MODEL, DEFAULT_EFFORT, DEFAULT_FALLBACK_MODEL, type ProjectSettings } from './settings.ts'
 
 // Персист частичных переопределений настроек per-project в data/settings.json.
 // effective() склеивает их с дефолтами.
@@ -24,6 +24,8 @@ export class SettingsStore {
       mode: o.mode ?? defaultMode,
       model: o.model ?? DEFAULT_MODEL,
       effort: o.effort ?? DEFAULT_EFFORT,
+      fallbackModel: o.fallbackModel ?? DEFAULT_FALLBACK_MODEL,
+      autoFailover: o.autoFailover ?? false,
     }
   }
 

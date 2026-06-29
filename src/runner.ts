@@ -13,6 +13,7 @@ export interface RunParams {
   permissionMode: PermissionMode
   model?: string
   maxThinkingTokens?: number
+  env?: Record<string, string>
   resume?: string
   onApproval?: ApprovalFn
 }
@@ -44,6 +45,7 @@ export async function* runPrompt(p: RunParams, q: QueryFn = query): AsyncGenerat
       settingSources: ['project'],
       ...(p.model ? { model: p.model } : {}),
       ...(p.maxThinkingTokens ? { maxThinkingTokens: p.maxThinkingTokens } : {}),
+      ...(p.env ? { env: p.env } : {}),
       ...(p.resume ? { resume: p.resume } : {}),
       ...(canUseTool ? { canUseTool } : {}),
     },

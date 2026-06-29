@@ -41,14 +41,22 @@ describe('settingPatch (validation)', () => {
     expect(settingPatch({ kind: 'effort', value: 'ultra' })).toBeNull()
     expect(settingPatch({ kind: 'mode', value: 'bypassPermissions' })).toBeNull() // auto только через /auto <PIN>
   })
+  it('accepts fallback model and autofailover', () => {
+    expect(settingPatch({ kind: 'fallback', value: 'deepseek/deepseek-v4-pro' })).toEqual({ fallbackModel: 'deepseek/deepseek-v4-pro' })
+    expect(settingPatch({ kind: 'autofailover', value: 'on' })).toEqual({ autoFailover: true })
+    expect(settingPatch({ kind: 'autofailover', value: 'off' })).toEqual({ autoFailover: false })
+    expect(settingPatch({ kind: 'fallback', value: 'gpt-9' })).toBeNull()
+  })
 })
 
 describe('renderSettings', () => {
   it('shows human-readable model label and values', () => {
-    const text = renderSettings({ mode: 'acceptEdits', model: 'claude-opus-4-8', effort: 'high' })
+    const text = renderSettings({ mode: 'acceptEdits', model: 'claude-opus-4-8', effort: 'high', fallbackModel: 'deepseek/deepseek-v4-pro', autoFailover: true })
     expect(text).toContain('Opus 4.8')
     expect(text).toContain('acceptEdits')
     expect(text).toContain('high')
+    expect(text).toContain('DeepSeek V4 Pro')
+    expect(text).toContain('Авто-фолбэк: вкл')
   })
 })
 

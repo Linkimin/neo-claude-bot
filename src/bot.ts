@@ -9,7 +9,7 @@ import { ensureTopics } from './topicSetup.ts'
 import { resolveProject } from './route.ts'
 import { isAllowed } from './auth.ts'
 import { truncate, toolUseLine, resultFooter } from './render.ts'
-import { MODELS, EFFORTS, parseSettingAction, settingPatch, renderSettings, checkPin } from './settings.ts'
+import { MODELS, EFFORTS, FALLBACK_MODELS, parseSettingAction, settingPatch, renderSettings, checkPin } from './settings.ts'
 import { ApprovalRegistry, renderApprovalRequest, parseApprovalCallback } from './approvals.ts'
 import { renderStatus, type StatusItem } from './status.ts'
 import { LimitsStore, type QueueItem } from './limitsStore.ts'
@@ -30,6 +30,10 @@ function settingsKeyboard(): InlineKeyboard {
   for (const e of EFFORTS) kb.text(e, `set:effort:${e}`)
   kb.row()
   kb.text('accept edits', 'set:mode:acceptEdits').text('default', 'set:mode:default').text('auto 🔒', 'mode:auto-locked')
+  kb.row()
+  for (const m of FALLBACK_MODELS) kb.text('FB: ' + m.label, `set:fallback:${m.id}`)
+  kb.row()
+  kb.text('🟦 Claude', 'provider:claude').text('🟠 Fallback', 'provider:fallback')
   return kb
 }
 
@@ -135,12 +139,19 @@ export function createBot(
         } else if (ev.kind === 'init') {
           log.info('[run]', project, 'model=', ev.model, 'mode=', ev.mode)
         } else if (ev.kind === 'rate_limit') {
-          limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
-          if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
+          // Некоторые rate_limit-события приходят без utilization/resetsAt — их в БД не пишем (колонки NOT NULL).
+          if (typeof ev.utilization === 'number' && typeof ev.resetsAt === 'number') {
+            limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
+            if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
+          } else {
+            log.info('[rate_limit] неполное событие, пропуск:', ev.status)
+          }
         }
       }, onApproval)
     } catch (err) {
-      if (!limitBlocked) await send('❌ Сбой: ' + (err instanceof Error ? err.message : String(err)))
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('[run error]', project, msg)
+      if (!limitBlocked) await send('❌ Сбой: ' + msg)
     }
     await dropStatus()
 
@@ -210,7 +221,7 @@ export function createBot(
     const project = projectFor(ctx.chat?.type, threadId)
     if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
     const eff = settings.effective(project, registry.get(project).defaultMode)
-    await ctx.reply(`Проект: ${project}\n${renderSettings(eff)}`, {
+    await ctx.reply(`Проект: ${project}\nПровайдер: ${core.getProvider(project)}\n${renderSettings(eff)}`, {
       reply_markup: settingsKeyboard(),
       ...(threadId ? { message_thread_id: threadId } : {}),
     })
@@ -253,6 +264,19 @@ export function createBot(
 
     if (data === 'mode:auto-locked') {
       await ctx.answerCallbackQuery({ text: 'Включить auto: отправь команду /auto <PIN>', show_alert: true })
+      return
+    }
+
+    if (data === 'provider:claude' || data === 'provider:fallback') {
+      const tId = ctx.callbackQuery.message?.message_thread_id
+      const proj = projectFor(ctx.callbackQuery.message?.chat.type, tId)
+      if (!proj) { await ctx.answerCallbackQuery('Нет проекта'); return }
+      const want = data === 'provider:fallback' ? 'fallback' : 'claude'
+      if (want === 'fallback' && !config.fallback) { await ctx.answerCallbackQuery({ text: 'Фолбэк не настроен (ROUTERAI_API_KEY)', show_alert: true }); return }
+      core.setProvider(proj, want)
+      await ctx.answerCallbackQuery(want === 'fallback' ? '🟠 Fallback' : '🟦 Claude')
+      const eff = settings.effective(proj, registry.get(proj).defaultMode)
+      await ctx.editMessageText(`Проект: ${proj}\nПровайдер: ${core.getProvider(proj)}\n${renderSettings(eff)}`, { reply_markup: settingsKeyboard() }).catch(() => {})
       return
     }
 
