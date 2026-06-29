@@ -19,6 +19,7 @@ export function ensureCcrConfig(opts: { baseUrl: string; apiKey: string; port: n
 }
 
 // Поднимает локальный CCR-прокси как дочерний процесс и перезапускает при выходе.
+// Если на порту уже слушает CCR (напр. остался от прошлого запуска) — не спавнит и не лупит.
 export class CcrProcess {
   private child: ChildProcess | null = null
   private stopped = false
@@ -28,11 +29,30 @@ export class CcrProcess {
     private readonly args: string[],
     private readonly cwd: string,
     private readonly env: Record<string, string>,
+    private readonly healthUrl: string,
   ) {}
 
-  start(): void {
+  async start(): Promise<void> {
     this.stopped = false
+    await this.ensureUp()
+  }
+
+  private async ensureUp(): Promise<void> {
+    if (this.stopped) return
+    if (await this.healthy()) {
+      log.info('CCR: уже доступен на', this.healthUrl, '— не спавню')
+      return
+    }
     this.spawnOnce()
+  }
+
+  private async healthy(): Promise<boolean> {
+    try {
+      await fetch(this.healthUrl, { signal: AbortSignal.timeout(2000) })
+      return true
+    } catch {
+      return false
+    }
   }
 
   private spawnOnce(): void {
@@ -47,7 +67,8 @@ export class CcrProcess {
     this.child.on('exit', (code) => {
       log.info('CCR: процесс вышел, код', code ?? 'null')
       this.child = null
-      if (!this.stopped) setTimeout(() => this.spawnOnce(), 3000)
+      // Перед респавном проверяем health: если порт уже кто-то держит — не лупим.
+      if (!this.stopped) setTimeout(() => { void this.ensureUp() }, 3000)
     })
     this.child.on('error', (e) => log.error('CCR: ошибка процесса', e instanceof Error ? e.message : String(e)))
   }

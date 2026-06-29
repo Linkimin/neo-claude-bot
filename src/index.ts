@@ -41,8 +41,8 @@ async function main() {
       models: FALLBACK_MODELS.map((m) => m.id),
       defaultModel: DEFAULT_FALLBACK_MODEL,
     })
-    ccr = new CcrProcess('npx', ['ccr', 'start'], resolve('.'), {})
-    ccr.start()
+    ccr = new CcrProcess('npx', ['ccr', 'start'], resolve('.'), {}, config.fallback.ccrUrl)
+    await ccr.start()
   }
 
   const created = await ensureTopics(bot.api, config.groupId, registry.names(), topics)
