@@ -52,3 +52,18 @@ describe('loadConfig fallback', () => {
     expect(cfg.fallback!.ccrPort).toBe(3456)
   })
 })
+
+describe('loadConfig spend thresholds', () => {
+  const base = { TELEGRAM_BOT_TOKEN: 'abc', TELEGRAM_USER_ID: '1', TELEGRAM_GROUP_ID: '-1', SETTINGS_PIN: '1' }
+
+  it('null when not set', () => {
+    const cfg = loadConfig(base)
+    expect(cfg.spendAlertUsd).toBeNull()
+    expect(cfg.routeraiBalanceMin).toBeNull()
+  })
+  it('parses numbers when set', () => {
+    const cfg = loadConfig({ ...base, SPEND_ALERT_USD: '5', ROUTERAI_BALANCE_MIN: '3.5' })
+    expect(cfg.spendAlertUsd).toBe(5)
+    expect(cfg.routeraiBalanceMin).toBe(3.5)
+  })
+})
