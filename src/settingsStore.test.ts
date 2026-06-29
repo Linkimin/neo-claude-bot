@@ -9,7 +9,7 @@ describe('SettingsStore', () => {
   it('effective() returns defaults when nothing stored', () => {
     const s = SettingsStore.load(TMP)
     expect(s.effective('spike', 'bypassPermissions')).toEqual({
-      mode: 'bypassPermissions', model: 'claude-sonnet-4-6', effort: 'medium',
+      mode: 'bypassPermissions', model: 'claude-sonnet-4-6', effort: 'medium', fallbackModel: 'deepseek/deepseek-v4-pro', autoFailover: false,
     })
   })
 
@@ -18,7 +18,7 @@ describe('SettingsStore', () => {
     s.set('spike', { model: 'claude-opus-4-8' })
     s.set('spike', { effort: 'high' })
     expect(s.effective('spike', 'acceptEdits')).toEqual({
-      mode: 'acceptEdits', model: 'claude-opus-4-8', effort: 'high',
+      mode: 'acceptEdits', model: 'claude-opus-4-8', effort: 'high', fallbackModel: 'deepseek/deepseek-v4-pro', autoFailover: false,
     })
   })
 
@@ -27,7 +27,7 @@ describe('SettingsStore', () => {
     s.set('game', { mode: 'bypassPermissions', model: 'claude-haiku-4-5-20251001', effort: 'max' })
     const reloaded = SettingsStore.load(TMP)
     expect(reloaded.effective('game', 'default')).toEqual({
-      mode: 'bypassPermissions', model: 'claude-haiku-4-5-20251001', effort: 'max',
+      mode: 'bypassPermissions', model: 'claude-haiku-4-5-20251001', effort: 'max', fallbackModel: 'deepseek/deepseek-v4-pro', autoFailover: false,
     })
   })
 })
