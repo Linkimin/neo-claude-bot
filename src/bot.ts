@@ -139,12 +139,19 @@ export function createBot(
         } else if (ev.kind === 'init') {
           log.info('[run]', project, 'model=', ev.model, 'mode=', ev.mode)
         } else if (ev.kind === 'rate_limit') {
-          limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
-          if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
+          // Некоторые rate_limit-события приходят без utilization/resetsAt — их в БД не пишем (колонки NOT NULL).
+          if (typeof ev.utilization === 'number' && typeof ev.resetsAt === 'number') {
+            limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
+            if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
+          } else {
+            log.info('[rate_limit] неполное событие, пропуск:', ev.status)
+          }
         }
       }, onApproval)
     } catch (err) {
-      if (!limitBlocked) await send('❌ Сбой: ' + (err instanceof Error ? err.message : String(err)))
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('[run error]', project, msg)
+      if (!limitBlocked) await send('❌ Сбой: ' + msg)
     }
     await dropStatus()
 
