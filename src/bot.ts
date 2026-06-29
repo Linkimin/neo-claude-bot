@@ -107,7 +107,8 @@ export function createBot(
       return decision
     }
 
-    const status = await send('⏳ работаю…')
+    const stopKb = new InlineKeyboard().text('⏹ Стоп', `stop:${project}`)
+    const status = await bot.api.sendMessage(chatId, '⏳ работаю…', { ...opts, reply_markup: stopKb })
     let statusDropped = false
     const dropStatus = async () => {
       if (statusDropped) return
@@ -137,11 +138,9 @@ export function createBot(
     try {
       await core.handle(project, prompt, async (ev) => {
         if (ev.kind === 'assistant_text') {
-          await dropStatus()
           answerBuf += ev.text
           await renderAnswer(false)
         } else if (ev.kind === 'tool_use') {
-          await dropStatus()
           if (answerMsgId !== null) await renderAnswer(true)
           answerMsgId = null
           answerBuf = ''
@@ -162,9 +161,14 @@ export function createBot(
         }
       }, onApproval)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      log.error('[run error]', project, msg)
-      if (!limitBlocked) await send('❌ Сбой: ' + msg)
+      const aborted = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))
+      if (aborted) {
+        await send('⏹ Остановлено.')
+      } else {
+        const msg = err instanceof Error ? err.message : String(err)
+        log.error('[run error]', project, msg)
+        if (!limitBlocked) await send('❌ Сбой: ' + msg)
+      }
     }
     await dropStatus()
 
@@ -224,6 +228,14 @@ export function createBot(
     await ctx.reply(`🆕 ${project}: начнётся новая сессия.`, threadId ? { message_thread_id: threadId } : {})
   })
 
+  bot.command('stop', async (ctx) => {
+    const threadId = ctx.message?.message_thread_id
+    const project = projectFor(ctx.chat?.type, threadId)
+    if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
+    const ok = core.interrupt(project)
+    await ctx.reply(ok ? '⏹ Останавливаю…' : 'Нечего останавливать.', threadId ? { message_thread_id: threadId } : {})
+  })
+
   // /simlimit [промпт] — DEV: симулирует исчерпание (reset через 30с) и ставит запрос в очередь,
   // чтобы вживую показать авто-продолжение без реального упора в лимит.
   bot.command('simlimit', async (ctx) => {
@@ -280,6 +292,12 @@ export function createBot(
 
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data
+
+    if (data.startsWith('stop:')) {
+      const ok = core.interrupt(data.slice(5))
+      await ctx.answerCallbackQuery(ok ? '⏹ Останавливаю…' : 'Нечего останавливать')
+      return
+    }
 
     const rec = parseRecoveryCallback(data)
     if (rec) {
