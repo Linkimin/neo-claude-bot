@@ -22,6 +22,7 @@ import { log } from './logger.ts'
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
+const APPROVAL_REMINDER_MS = 2 * 60 * 1000 // напомнить, если апрув висит дольше 2 мин
 const CONTINUE_BUFFER_MS = 5000 // запас после resetsAt перед авто-продолжением
 
 function settingsKeyboard(): InlineKeyboard {
@@ -87,6 +88,18 @@ export function createBot(
     }, delay)
   }
 
+  // Дедуп анонсов сброса окна: window -> уже анонсированный resetsAt.
+  const announcedReset = new Map<string, number>()
+  function scheduleLimitResetNotice(window: string, resetsAt: number): void {
+    if (resetsAt * 1000 <= Date.now()) return
+    if (announcedReset.get(window) === resetsAt) return
+    announcedReset.set(window, resetsAt)
+    const delay = resetsAt * 1000 - Date.now() + 1000
+    setTimeout(async () => {
+      await bot.api.sendMessage(config.allowedUserId, `📊 Лимиты Claude сбросились (${window}) — снова полные.`).catch(() => {})
+    }, delay)
+  }
+
   // Единая обработка прогона: статус → стрим → апрувы → детект исчерпания/очередь.
   // Работает через bot.api (без ctx), чтобы её мог вызвать и планировщик.
   async function executeRun(chatId: number, threadId: number | undefined, project: string, prompt: string): Promise<void> {
@@ -99,15 +112,20 @@ export function createBot(
       const { id, promise } = approvals.register()
       const kb = new InlineKeyboard().text('✔ Разрешить', `appr:approve:${id}`).text('✖ Отклонить', `appr:deny:${id}`)
       const m = await bot.api.sendMessage(chatId, renderApprovalRequest(toolName, input), { ...opts, reply_markup: kb })
-      const timer = setTimeout(() => { approvals.resolve(id, 'deny') }, APPROVAL_TIMEOUT_MS)
+      const denyTimer = setTimeout(() => { approvals.resolve(id, 'deny') }, APPROVAL_TIMEOUT_MS)
+      const remindTimer = setTimeout(() => {
+        void bot.api.sendMessage(chatId, `⏰ Всё ещё ждёт разрешения: 🔧 ${toolName}`, opts).catch(() => {})
+      }, APPROVAL_REMINDER_MS)
       const decision = await promise
-      clearTimeout(timer)
+      clearTimeout(denyTimer)
+      clearTimeout(remindTimer)
       const verdict = decision.allow ? '✅ Разрешено' : '🚫 ' + decision.message
       await bot.api.editMessageText(chatId, m.message_id, renderApprovalRequest(toolName, input) + '\n' + verdict).catch(() => {})
       return decision
     }
 
-    const status = await send('⏳ работаю…')
+    const stopKb = new InlineKeyboard().text('⏹ Стоп', `stop:${project}`)
+    const status = await bot.api.sendMessage(chatId, '⏳ работаю…', { ...opts, reply_markup: stopKb })
     let statusDropped = false
     const dropStatus = async () => {
       if (statusDropped) return
@@ -137,11 +155,9 @@ export function createBot(
     try {
       await core.handle(project, prompt, async (ev) => {
         if (ev.kind === 'assistant_text') {
-          await dropStatus()
           answerBuf += ev.text
           await renderAnswer(false)
         } else if (ev.kind === 'tool_use') {
-          await dropStatus()
           if (answerMsgId !== null) await renderAnswer(true)
           answerMsgId = null
           answerBuf = ''
@@ -154,6 +170,7 @@ export function createBot(
         } else if (ev.kind === 'rate_limit') {
           // Некоторые rate_limit-события приходят без utilization/resetsAt — их в БД не пишем (колонки NOT NULL).
           if (typeof ev.utilization === 'number' && typeof ev.resetsAt === 'number') {
+            scheduleLimitResetNotice(ev.rateLimitType, ev.resetsAt)
             limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
             if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
           } else {
@@ -162,9 +179,14 @@ export function createBot(
         }
       }, onApproval)
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      log.error('[run error]', project, msg)
-      if (!limitBlocked) await send('❌ Сбой: ' + msg)
+      const aborted = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))
+      if (aborted) {
+        await send('⏹ Остановлено.')
+      } else {
+        const msg = err instanceof Error ? err.message : String(err)
+        log.error('[run error]', project, msg)
+        if (!limitBlocked) await send('❌ Сбой: ' + msg)
+      }
     }
     await dropStatus()
 
@@ -224,6 +246,14 @@ export function createBot(
     await ctx.reply(`🆕 ${project}: начнётся новая сессия.`, threadId ? { message_thread_id: threadId } : {})
   })
 
+  bot.command('stop', async (ctx) => {
+    const threadId = ctx.message?.message_thread_id
+    const project = projectFor(ctx.chat?.type, threadId)
+    if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
+    const ok = core.interrupt(project)
+    await ctx.reply(ok ? '⏹ Останавливаю…' : 'Нечего останавливать.', threadId ? { message_thread_id: threadId } : {})
+  })
+
   // /simlimit [промпт] — DEV: симулирует исчерпание (reset через 30с) и ставит запрос в очередь,
   // чтобы вживую показать авто-продолжение без реального упора в лимит.
   bot.command('simlimit', async (ctx) => {
@@ -280,6 +310,12 @@ export function createBot(
 
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data
+
+    if (data.startsWith('stop:')) {
+      const ok = core.interrupt(data.slice(5))
+      await ctx.answerCallbackQuery(ok ? '⏹ Останавливаю…' : 'Нечего останавливать')
+      return
+    }
 
     const rec = parseRecoveryCallback(data)
     if (rec) {
@@ -345,6 +381,9 @@ export function createBot(
 
   // На старте — переочередь незавершённых авто-продолжений из БД.
   for (const item of limits.listQueue()) scheduleContinue(item)
+
+  // На старте — переочередь анонсов сброса по сохранённым окнам.
+  for (const s of limits.listLimits()) scheduleLimitResetNotice(s.window, s.resetsAt)
 
   // На старте — восстановление прерванных прогонов (кнопками).
   for (const r of runs.listInterrupted()) {

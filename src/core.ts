@@ -12,6 +12,7 @@ export type RunFn = (p: RunParams) => AsyncGenerator<RunnerEvent>
 export class Core {
   private readonly running = new Set<string>()
   private readonly providers = new Map<string, Provider>()
+  private readonly controllers = new Map<string, AbortController>()
 
   constructor(
     private readonly registry: Registry,
@@ -33,6 +34,14 @@ export class Core {
     this.providers.set(project, provider)
   }
 
+  interrupt(project: string): boolean {
+    const c = this.controllers.get(project)
+    if (!c) return false
+    c.abort()
+    this.controllers.delete(project)
+    return true
+  }
+
   async handle(
     projectName: string,
     prompt: string,
@@ -45,7 +54,9 @@ export class Core {
     const override = providerOverride(provider, eff.fallbackModel, this.fallback)
     const resume = this.sessions.getSessionId(projectName)
 
+    const controller = new AbortController()
     this.running.add(projectName)
+    this.controllers.set(projectName, controller)
     try {
       for await (const ev of this.run({
         cwd: project.dir,
@@ -54,6 +65,7 @@ export class Core {
         model: override.model ?? eff.model,
         maxThinkingTokens: provider === 'fallback' ? undefined : EFFORT_THINKING[eff.effort],
         env: override.env,
+        abortController: controller,
         resume,
         onApproval,
       })) {
@@ -63,6 +75,7 @@ export class Core {
       }
     } finally {
       this.running.delete(projectName)
+      this.controllers.delete(projectName)
     }
   }
 }
