@@ -15,6 +15,9 @@ import { renderStatus, type StatusItem } from './status.ts'
 import { LimitsStore, type QueueItem } from './limitsStore.ts'
 import { classifyLimit, formatReset, renderLimits } from './limits.ts'
 import { shouldAutoFailover } from './providers.ts'
+import { SpendStore, todayStr } from './spendStore.ts'
+import { renderSpend } from './spendView.ts'
+import { getRouteraiBalance } from './routeraiBalance.ts'
 import { RunStore } from './runStore.ts'
 import { parseRecoveryCallback } from './recovery.ts'
 import { log } from './logger.ts'
@@ -50,6 +53,7 @@ export function createBot(
   sessions: SessionStore,
   limits: LimitsStore,
   runs: RunStore,
+  spend: SpendStore,
 ): Bot {
   const bot = new Bot(config.botToken)
   const approvals = new ApprovalRegistry()
@@ -90,6 +94,7 @@ export function createBot(
 
   // Дедуп анонсов сброса окна: window -> уже анонсированный resetsAt.
   const announcedReset = new Map<string, number>()
+  let spendAlertedDay = ''
   function scheduleLimitResetNotice(window: string, resetsAt: number): void {
     if (resetsAt * 1000 <= Date.now()) return
     if (announcedReset.get(window) === resetsAt) return
@@ -165,6 +170,12 @@ export function createBot(
         } else if (ev.kind === 'result') {
           if (answerBuf) await renderAnswer(true)
           if (!limitBlocked) await send(resultFooter(ev))
+          spend.add(project, core.getProvider(project), ev.costUsd)
+          const day = todayStr()
+          if (config.spendAlertUsd !== null && spendAlertedDay !== day && spend.todayTotal(day) >= config.spendAlertUsd) {
+            spendAlertedDay = day
+            void bot.api.sendMessage(config.allowedUserId, `💰 Дневная оценка трат превысила $${config.spendAlertUsd}.`).catch(() => {})
+          }
         } else if (ev.kind === 'init') {
           log.info('[run]', project, 'model=', ev.model, 'mode=', ev.mode)
         } else if (ev.kind === 'rate_limit') {
@@ -236,6 +247,14 @@ export function createBot(
 
   bot.command('limits', async (ctx) => {
     await ctx.reply(renderLimits(limits.listLimits(), Date.now()), ctx.message?.message_thread_id ? { message_thread_id: ctx.message.message_thread_id } : {})
+  })
+
+  bot.command('spend', async (ctx) => {
+    let balance: number | null = null
+    if (config.fallback) {
+      balance = await getRouteraiBalance(config.fallback.baseUrl, config.fallback.apiKey).catch(() => null)
+    }
+    await ctx.reply(renderSpend(spend.today(), balance), ctx.message?.message_thread_id ? { message_thread_id: ctx.message.message_thread_id } : {})
   })
 
   bot.command('new', async (ctx) => {

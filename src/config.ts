@@ -11,6 +11,8 @@ export interface AppConfig {
   groupId: number
   pin: string
   fallback: FallbackConfig | null
+  spendAlertUsd: number | null
+  routeraiBalanceMin: number | null
 }
 
 // Принимает env-словарь явно (тестируемо); в проде передаём process.env.
@@ -42,5 +44,8 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
     fallback = { apiKey: routeraiKey, baseUrl, ccrPort, ccrUrl: `http://localhost:${ccrPort}` }
   }
 
-  return { botToken, allowedUserId, groupId, pin, fallback }
+  const spendAlertUsd = env.SPEND_ALERT_USD ? Number(env.SPEND_ALERT_USD) : null
+  const routeraiBalanceMin = env.ROUTERAI_BALANCE_MIN ? Number(env.ROUTERAI_BALANCE_MIN) : null
+
+  return { botToken, allowedUserId, groupId, pin, fallback, spendAlertUsd, routeraiBalanceMin }
 }
