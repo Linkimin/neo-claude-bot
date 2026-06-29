@@ -1,8 +1,16 @@
+export interface FallbackConfig {
+  apiKey: string
+  baseUrl: string
+  ccrPort: number
+  ccrUrl: string
+}
+
 export interface AppConfig {
   botToken: string
   allowedUserId: number
   groupId: number
   pin: string
+  fallback: FallbackConfig | null
 }
 
 // Принимает env-словарь явно (тестируемо); в проде передаём process.env.
@@ -25,5 +33,14 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
   const pin = env.SETTINGS_PIN
   if (!pin) throw new Error('Missing SETTINGS_PIN in environment')
 
-  return { botToken, allowedUserId, groupId, pin }
+  let fallback: FallbackConfig | null = null
+  const routeraiKey = env.ROUTERAI_API_KEY
+  if (routeraiKey) {
+    const baseUrl = env.ROUTERAI_BASE_URL
+    if (!baseUrl) throw new Error('ROUTERAI_API_KEY set but ROUTERAI_BASE_URL missing')
+    const ccrPort = Number(env.CCR_PORT ?? '3456')
+    fallback = { apiKey: routeraiKey, baseUrl, ccrPort, ccrUrl: `http://localhost:${ccrPort}` }
+  }
+
+  return { botToken, allowedUserId, groupId, pin, fallback }
 }
