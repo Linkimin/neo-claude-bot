@@ -22,6 +22,7 @@ import { log } from './logger.ts'
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
+const APPROVAL_REMINDER_MS = 2 * 60 * 1000 // напомнить, если апрув висит дольше 2 мин
 const CONTINUE_BUFFER_MS = 5000 // запас после resetsAt перед авто-продолжением
 
 function settingsKeyboard(): InlineKeyboard {
@@ -87,6 +88,18 @@ export function createBot(
     }, delay)
   }
 
+  // Дедуп анонсов сброса окна: window -> уже анонсированный resetsAt.
+  const announcedReset = new Map<string, number>()
+  function scheduleLimitResetNotice(window: string, resetsAt: number): void {
+    if (resetsAt * 1000 <= Date.now()) return
+    if (announcedReset.get(window) === resetsAt) return
+    announcedReset.set(window, resetsAt)
+    const delay = resetsAt * 1000 - Date.now() + 1000
+    setTimeout(async () => {
+      await bot.api.sendMessage(config.allowedUserId, `📊 Лимиты Claude сбросились (${window}) — снова полные.`).catch(() => {})
+    }, delay)
+  }
+
   // Единая обработка прогона: статус → стрим → апрувы → детект исчерпания/очередь.
   // Работает через bot.api (без ctx), чтобы её мог вызвать и планировщик.
   async function executeRun(chatId: number, threadId: number | undefined, project: string, prompt: string): Promise<void> {
@@ -99,9 +112,13 @@ export function createBot(
       const { id, promise } = approvals.register()
       const kb = new InlineKeyboard().text('✔ Разрешить', `appr:approve:${id}`).text('✖ Отклонить', `appr:deny:${id}`)
       const m = await bot.api.sendMessage(chatId, renderApprovalRequest(toolName, input), { ...opts, reply_markup: kb })
-      const timer = setTimeout(() => { approvals.resolve(id, 'deny') }, APPROVAL_TIMEOUT_MS)
+      const denyTimer = setTimeout(() => { approvals.resolve(id, 'deny') }, APPROVAL_TIMEOUT_MS)
+      const remindTimer = setTimeout(() => {
+        void bot.api.sendMessage(chatId, `⏰ Всё ещё ждёт разрешения: 🔧 ${toolName}`, opts).catch(() => {})
+      }, APPROVAL_REMINDER_MS)
       const decision = await promise
-      clearTimeout(timer)
+      clearTimeout(denyTimer)
+      clearTimeout(remindTimer)
       const verdict = decision.allow ? '✅ Разрешено' : '🚫 ' + decision.message
       await bot.api.editMessageText(chatId, m.message_id, renderApprovalRequest(toolName, input) + '\n' + verdict).catch(() => {})
       return decision
@@ -153,6 +170,7 @@ export function createBot(
         } else if (ev.kind === 'rate_limit') {
           // Некоторые rate_limit-события приходят без utilization/resetsAt — их в БД не пишем (колонки NOT NULL).
           if (typeof ev.utilization === 'number' && typeof ev.resetsAt === 'number') {
+            scheduleLimitResetNotice(ev.rateLimitType, ev.resetsAt)
             limits.upsertLimit({ window: ev.rateLimitType, utilization: ev.utilization, resetsAt: ev.resetsAt, status: ev.status })
             if (classifyLimit(ev.status) === 'blocked') { limitBlocked = true; blockedResetsAt = ev.resetsAt }
           } else {
@@ -363,6 +381,9 @@ export function createBot(
 
   // На старте — переочередь незавершённых авто-продолжений из БД.
   for (const item of limits.listQueue()) scheduleContinue(item)
+
+  // На старте — переочередь анонсов сброса по сохранённым окнам.
+  for (const s of limits.listLimits()) scheduleLimitResetNotice(s.window, s.resetsAt)
 
   // На старте — восстановление прерванных прогонов (кнопками).
   for (const r of runs.listInterrupted()) {
