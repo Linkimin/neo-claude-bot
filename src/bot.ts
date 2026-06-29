@@ -14,6 +14,7 @@ import { ApprovalRegistry, renderApprovalRequest, parseApprovalCallback } from '
 import { renderStatus, type StatusItem } from './status.ts'
 import { LimitsStore, type QueueItem } from './limitsStore.ts'
 import { classifyLimit, formatReset, renderLimits } from './limits.ts'
+import { shouldAutoFailover } from './providers.ts'
 import { RunStore } from './runStore.ts'
 import { parseRecoveryCallback } from './recovery.ts'
 import { log } from './logger.ts'
@@ -34,6 +35,8 @@ function settingsKeyboard(): InlineKeyboard {
   for (const m of FALLBACK_MODELS) kb.text('FB: ' + m.label, `set:fallback:${m.id}`)
   kb.row()
   kb.text('🟦 Claude', 'provider:claude').text('🟠 Fallback', 'provider:fallback')
+  kb.row()
+  kb.text('авто-FB вкл', 'set:autofailover:on').text('авто-FB выкл', 'set:autofailover:off')
   return kb
 }
 
@@ -71,6 +74,16 @@ export function createBot(
       const opts = item.threadId ? { message_thread_id: item.threadId } : {}
       await bot.api.sendMessage(item.chatId, `▶️ Лимиты восстановлены — продолжаю «${item.project}».`, opts).catch(() => {})
       await executeRun(item.chatId, item.threadId ?? undefined, item.project, item.prompt)
+    }, delay)
+  }
+
+  // Возврат на Claude по наступлении resetsAt после авто-фолбэка.
+  function scheduleSwitchBack(project: string, resetsAt: number, chatId: number, threadId: number | undefined): void {
+    const delay = Math.max(0, resetsAt * 1000 - Date.now()) + CONTINUE_BUFFER_MS
+    setTimeout(async () => {
+      core.setProvider(project, 'claude')
+      const opts = threadId ? { message_thread_id: threadId } : {}
+      await bot.api.sendMessage(chatId, `▶️ Лимиты Claude вернулись — «${project}» снова на Claude.`, opts).catch(() => {})
     }, delay)
   }
 
@@ -155,12 +168,21 @@ export function createBot(
     }
     await dropStatus()
 
-    // Исчерпание ловим и на result-, и на throw-пути: ставим в очередь + планируем авто-продолжение.
+    // Исчерпание: авто-фолбэк (если включён) или очередь+ожидание (M5.5).
     if (limitBlocked) {
-      const base = { project, chatId, threadId: threadId ?? null, prompt, resetsAt: blockedResetsAt }
-      const id = limits.enqueue(base)
-      await send(`⛔ Лимиты закончились.\nВосстановление ${formatReset(blockedResetsAt, Date.now())}.\nПродолжу запрос автоматически.`)
-      scheduleContinue({ id, ...base })
+      const eff = settings.effective(project, registry.get(project).defaultMode)
+      if (shouldAutoFailover(eff.autoFailover, config.fallback !== null, core.getProvider(project))) {
+        core.setProvider(project, 'fallback')
+        const fbLabel = FALLBACK_MODELS.find((m) => m.id === eff.fallbackModel)?.label ?? eff.fallbackModel
+        await send(`⛔ Лимиты Claude кончились — перехожу на fallback (${fbLabel}). Возврат в ${formatReset(blockedResetsAt, Date.now())}.`)
+        scheduleSwitchBack(project, blockedResetsAt, chatId, threadId)
+        void executeRun(chatId, threadId, project, prompt)
+      } else {
+        const base = { project, chatId, threadId: threadId ?? null, prompt, resetsAt: blockedResetsAt }
+        const id = limits.enqueue(base)
+        await send(`⛔ Лимиты закончились.\nВосстановление ${formatReset(blockedResetsAt, Date.now())}.\nПродолжу запрос автоматически.`)
+        scheduleContinue({ id, ...base })
+      }
     }
     } finally {
       runs.remove(runId)
@@ -214,6 +236,22 @@ export function createBot(
     const id = limits.enqueue(base)
     await ctx.reply(`⛔ [симуляция] Лимиты закончились. Восстановление ${formatReset(resetsAt, Date.now())}. Продолжу автоматически.`, threadId ? { message_thread_id: threadId } : {})
     scheduleContinue({ id, ...base })
+  })
+
+  // /simfail [промпт] — DEV: симулирует авто-фолбэк (переход на fallback + дозапуск + возврат через 30с).
+  bot.command('simfail', async (ctx) => {
+    const threadId = ctx.message?.message_thread_id
+    const project = projectFor(ctx.chat?.type, threadId)
+    if (!project || !ctx.chat) { await ctx.reply('Эта тема не привязана к проекту.'); return }
+    if (!config.fallback) { await ctx.reply('Фолбэк не настроен (ROUTERAI_API_KEY).'); return }
+    const prompt = (ctx.match ?? '').toString().trim() || 'Скажи одно слово: готово.'
+    core.setProvider(project, 'fallback')
+    const eff = settings.effective(project, registry.get(project).defaultMode)
+    const fbLabel = FALLBACK_MODELS.find((m) => m.id === eff.fallbackModel)?.label ?? eff.fallbackModel
+    const resetsAt = Math.floor(Date.now() / 1000) + 30
+    await ctx.reply(`⛔ [симуляция] Лимиты Claude кончились — перехожу на fallback (${fbLabel}). Возврат через ~30с.`, threadId ? { message_thread_id: threadId } : {})
+    scheduleSwitchBack(project, resetsAt, ctx.chat.id, threadId ?? undefined)
+    void executeRun(ctx.chat.id, threadId ?? undefined, project, prompt)
   })
 
   bot.command('settings', async (ctx) => {
