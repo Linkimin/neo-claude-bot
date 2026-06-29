@@ -18,3 +18,8 @@ export function providerOverride(
     env: { ANTHROPIC_BASE_URL: fb.ccrUrl, ANTHROPIC_AUTH_TOKEN: fb.authToken, ANTHROPIC_API_KEY: '' },
   }
 }
+
+// Решение об авто-переключении на fallback при исчерпании лимита Claude. Чистая.
+export function shouldAutoFailover(autoFailover: boolean, fallbackConfigured: boolean, current: Provider): boolean {
+  return autoFailover && fallbackConfigured && current === 'claude'
+}
