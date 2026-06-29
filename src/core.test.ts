@@ -83,4 +83,33 @@ describe('Core.handle', () => {
     await core.handle('spike', 'do it', () => {})
     expect(core.isRunning('spike')).toBe(false)
   })
+
+  it('passes an AbortController to the runner', async () => {
+    let seen: any
+    const settings = SettingsStore.load(TMP)
+    const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
+    await core.handle('spike', 'do it', () => {})
+    expect(seen.abortController).toBeInstanceOf(AbortController)
+  })
+
+  it('interrupt returns false when nothing is running', () => {
+    const settings = SettingsStore.load(TMP)
+    const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([]))
+    expect(core.interrupt('spike')).toBe(false)
+  })
+
+  it('interrupt aborts the in-flight run and returns true', async () => {
+    const settings = SettingsStore.load(TMP)
+    const run = (p: any) => (async function* (): AsyncGenerator<RunnerEvent> {
+      await new Promise<void>((resolve) => p.abortController.signal.addEventListener('abort', () => resolve()))
+      yield { kind: 'result', ok: false, sessionId: 's', costUsd: 0, numTurns: 0 }
+    })()
+    const core = new Core(registry, settings, new SessionStore(':memory:'), fb, run)
+    let interrupted = false
+    const p = core.handle('spike', 'long', () => {}).then(() => { interrupted = true })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(core.interrupt('spike')).toBe(true)
+    await p
+    expect(interrupted).toBe(true)
+  })
 })

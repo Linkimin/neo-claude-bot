@@ -14,6 +14,7 @@ export interface RunParams {
   model?: string
   maxThinkingTokens?: number
   env?: Record<string, string>
+  abortController?: AbortController
   resume?: string
   onApproval?: ApprovalFn
 }
@@ -46,6 +47,7 @@ export async function* runPrompt(p: RunParams, q: QueryFn = query): AsyncGenerat
       ...(p.model ? { model: p.model } : {}),
       ...(p.maxThinkingTokens ? { maxThinkingTokens: p.maxThinkingTokens } : {}),
       ...(p.env ? { env: p.env } : {}),
+      ...(p.abortController ? { abortController: p.abortController } : {}),
       ...(p.resume ? { resume: p.resume } : {}),
       ...(canUseTool ? { canUseTool } : {}),
     },
