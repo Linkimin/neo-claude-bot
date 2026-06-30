@@ -1,4 +1,4 @@
-import { Bot, InlineKeyboard } from 'grammy'
+import { Bot, InlineKeyboard, InputFile } from 'grammy'
 import type { AppConfig } from './config.ts'
 import { Core } from './core.ts'
 import { Registry } from './registry.ts'
@@ -8,7 +8,9 @@ import { SessionStore } from './sessionStore.ts'
 import { ensureTopics } from './topicSetup.ts'
 import { resolveProject } from './route.ts'
 import { isAllowed } from './auth.ts'
-import { truncate, toolUseLine, resultFooter } from './render.ts'
+import { renderToolUse, resultFooter } from './render.ts'
+import { mdToHtml } from './mdToHtml.ts'
+import { splitForTelegram } from './chunk.ts'
 import { MODELS, EFFORTS, FALLBACK_MODELS, parseSettingAction, settingPatch, renderSettings, checkPin } from './settings.ts'
 import { ApprovalRegistry, renderApprovalRequest, parseApprovalCallback } from './approvals.ts'
 import { renderStatus, type StatusItem } from './status.ts'
@@ -33,6 +35,8 @@ import { log } from './logger.ts'
 
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
 const TG_LIMIT = 4096
+const FILE_THRESHOLD = 20000 // сырой markdown длиннее — отдаём .md файлом
+const MAX_ANSWER_CHUNKS = 8 // больше кусков — лучше файлом
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
 const APPROVAL_REMINDER_MS = 2 * 60 * 1000 // напомнить, если апрув висит дольше 2 мин
 const CONTINUE_BUFFER_MS = 5000 // запас после resetsAt перед авто-продолжением
@@ -155,18 +159,32 @@ export function createBot(
     let answerMsgId: number | null = null
     let answerBuf = ''
     let lastEdit = 0
+    let lastHead = ''
+    const sendHtml = (text: string) => bot.api.sendMessage(chatId, text, { ...opts, parse_mode: 'HTML' })
+    // Стримим первый чанк в живое сообщение; при финале доносим остальные чанки,
+    // а очень длинный ответ — файлом answer.md (вместо обрезки на 4096).
     const renderAnswer = async (force: boolean) => {
-      const text = truncate(answerBuf || '…', TG_LIMIT)
+      const html = mdToHtml(answerBuf || '…')
+      const chunks = splitForTelegram(html, TG_LIMIT)
+      const head = chunks[0]
       if (answerMsgId === null) {
-        const m = await send(text)
+        const m = await sendHtml(head)
         answerMsgId = m.message_id
+        lastHead = head
         lastEdit = Date.now()
-      } else {
+      } else if (head !== lastHead) {
         const now = Date.now()
         if (!force && now - lastEdit < 1500) return
         lastEdit = now
-        await bot.api.editMessageText(chatId, answerMsgId, text).catch(() => {})
+        lastHead = head
+        await bot.api.editMessageText(chatId, answerMsgId, head, { parse_mode: 'HTML' }).catch(() => {})
       }
+      if (!force) return
+      if (answerBuf.length > FILE_THRESHOLD || chunks.length > MAX_ANSWER_CHUNKS) {
+        await bot.api.sendDocument(chatId, new InputFile(Buffer.from(answerBuf, 'utf8'), 'answer.md'), { ...opts, caption: '📄 полный ответ' }).catch(() => {})
+        return
+      }
+      for (let i = 1; i < chunks.length; i++) await sendHtml(chunks[i])
     }
 
     let limitBlocked = false
@@ -181,7 +199,8 @@ export function createBot(
           if (answerMsgId !== null) await renderAnswer(true)
           answerMsgId = null
           answerBuf = ''
-          await send(toolUseLine(ev.name, ev.input))
+          lastHead = ''
+          await bot.api.sendMessage(chatId, renderToolUse(ev.name, ev.input), { ...opts, parse_mode: 'HTML' })
         } else if (ev.kind === 'result') {
           if (answerBuf) await renderAnswer(true)
           if (ev.interrupted) {

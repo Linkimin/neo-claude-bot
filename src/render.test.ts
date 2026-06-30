@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { truncate, toolUseLine, resultFooter } from './render.ts'
+import { truncate, resultFooter } from './render.ts'
 
 describe('render helpers', () => {
   it('truncate keeps short text as-is', () => {
@@ -9,9 +9,6 @@ describe('render helpers', () => {
     const out = truncate('a'.repeat(50), 10)
     expect(out.length).toBeLessThanOrEqual(10 + 1) // ровно maxLen + символ '…'
     expect(out.endsWith('…')).toBe(true)
-  })
-  it('toolUseLine formats tool name', () => {
-    expect(toolUseLine('Edit', { file_path: 'a.txt' })).toBe('🔧 Edit')
   })
   it('resultFooter for ok', () => {
     expect(resultFooter({ kind: 'result', ok: true, interrupted: false, sessionId: 's', costUsd: 0.1234, numTurns: 6 })).toBe('✅ готово · 6 turns · $0.1234')
