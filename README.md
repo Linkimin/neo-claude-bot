@@ -1,4 +1,4 @@
-# claud-bot
+# claude-bot
 
 **English** · [Русский](README.ru.md)
 
