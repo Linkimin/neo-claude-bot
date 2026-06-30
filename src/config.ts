@@ -13,6 +13,7 @@ export interface AppConfig {
   fallback: FallbackConfig | null
   spendAlertUsd: number | null
   routeraiBalanceMin: number | null
+  projectRoots: string[]
 }
 
 // Принимает env-словарь явно (тестируемо); в проде передаём process.env.
@@ -47,5 +48,10 @@ export function loadConfig(env: NodeJS.ProcessEnv | Record<string, string | unde
   const spendAlertUsd = env.SPEND_ALERT_USD ? Number(env.SPEND_ALERT_USD) : null
   const routeraiBalanceMin = env.ROUTERAI_BALANCE_MIN ? Number(env.ROUTERAI_BALANCE_MIN) : null
 
-  return { botToken, allowedUserId, groupId, pin, fallback, spendAlertUsd, routeraiBalanceMin }
+  const projectRoots = (env.PROJECT_ROOTS ?? '')
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  return { botToken, allowedUserId, groupId, pin, fallback, spendAlertUsd, routeraiBalanceMin, projectRoots }
 }

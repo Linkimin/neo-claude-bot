@@ -67,3 +67,17 @@ describe('loadConfig spend thresholds', () => {
     expect(cfg.routeraiBalanceMin).toBe(3.5)
   })
 })
+
+describe('loadConfig projectRoots', () => {
+  const base = { TELEGRAM_BOT_TOKEN: 'abc', TELEGRAM_USER_ID: '1', TELEGRAM_GROUP_ID: '-1', SETTINGS_PIN: '1' }
+
+  it('returns empty array when PROJECT_ROOTS is absent', () => {
+    expect(loadConfig(base).projectRoots).toEqual([])
+  })
+  it('parses ;-separated paths and trims whitespace', () => {
+    expect(loadConfig({ ...base, PROJECT_ROOTS: 'D:/work ; D:/play' }).projectRoots).toEqual(['D:/work', 'D:/play'])
+  })
+  it('ignores empty segments', () => {
+    expect(loadConfig({ ...base, PROJECT_ROOTS: ';D:/work;;' }).projectRoots).toEqual(['D:/work'])
+  })
+})
