@@ -16,3 +16,6 @@ tmp/
 # OS
 Thumbs.db
 .DS_Store
+
+# Internal design docs (specs / plans / findings) — kept locally, not published
+docs/superpowers/

@@ -2,6 +2,13 @@
   "name": "claud-bot",
   "version": "0.0.0",
   "private": true,
+  "description": "Drive your desktop Claude Code (Agent SDK) from your phone over Telegram: per-project forum topics, approvals, interrupts, sessions, rate-limit auto-continue, model failover, spend tracking, always-online Windows service.",
+  "license": "AGPL-3.0-only",
+  "author": "Matvey Bakhmatov (@Linkimin)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Linkimin/claud-bot"
+  },
   "type": "module",
   "scripts": {
     "spike:hello": "tsx spikes/00-hello.ts",
