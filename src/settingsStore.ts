@@ -1,25 +1,27 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import Database from 'better-sqlite3'
+import { existsSync, readFileSync } from 'node:fs'
 import type { PermissionMode } from './registry.ts'
 import { DEFAULT_MODEL, DEFAULT_EFFORT, DEFAULT_FALLBACK_MODEL, type ProjectSettings } from './settings.ts'
 
-// Персист частичных переопределений настроек per-project в data/settings.json.
+// Персист частичных переопределений настроек per-project в SQLite.
 // effective() склеивает их с дефолтами.
 export class SettingsStore {
-  private constructor(
-    private readonly path: string,
-    private readonly data: Record<string, Partial<ProjectSettings>>,
-  ) {}
+  private readonly db: Database.Database
 
-  static load(path: string): SettingsStore {
-    const data = existsSync(path)
-      ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, Partial<ProjectSettings>>)
-      : {}
-    return new SettingsStore(path, data)
+  constructor(path: string) {
+    this.db = new Database(path)
+    this.db.pragma('busy_timeout = 5000')
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        slug TEXT PRIMARY KEY,
+        json TEXT NOT NULL
+      )
+    `)
   }
 
   effective(project: string, defaultMode: PermissionMode): ProjectSettings {
-    const o = this.data[project] ?? {}
+    const row = this.db.prepare('SELECT json FROM settings WHERE slug = ?').get(project) as { json: string } | undefined
+    const o: Partial<ProjectSettings> = row ? JSON.parse(row.json) : {}
     return {
       mode: o.mode ?? defaultMode,
       model: o.model ?? DEFAULT_MODEL,
@@ -30,12 +32,31 @@ export class SettingsStore {
   }
 
   set(project: string, patch: Partial<ProjectSettings>): void {
-    this.data[project] = { ...(this.data[project] ?? {}), ...patch }
-    this.save()
+    const row = this.db.prepare('SELECT json FROM settings WHERE slug = ?').get(project) as { json: string } | undefined
+    const merged: Partial<ProjectSettings> = { ...(row ? JSON.parse(row.json) : {}), ...patch }
+    this.db
+      .prepare('INSERT INTO settings (slug, json) VALUES (?, ?) ON CONFLICT(slug) DO UPDATE SET json = excluded.json')
+      .run(project, JSON.stringify(merged))
   }
 
-  private save(): void {
-    mkdirSync(dirname(this.path), { recursive: true })
-    writeFileSync(this.path, JSON.stringify(this.data, null, 2))
+  remove(project: string): void {
+    this.db.prepare('DELETE FROM settings WHERE slug = ?').run(project)
+  }
+
+  close(): void {
+    this.db.close()
+  }
+
+  static migrateFromJson(store: SettingsStore, jsonPath: string): number {
+    const existing = store.db.prepare('SELECT 1 FROM settings LIMIT 1').get()
+    if (existing) return 0
+    if (!existsSync(jsonPath)) return 0
+    const data = JSON.parse(readFileSync(jsonPath, 'utf8')) as Record<string, Partial<ProjectSettings>>
+    let n = 0
+    for (const [slug, patch] of Object.entries(data)) {
+      store.set(slug, patch)
+      n++
+    }
+    return n
   }
 }

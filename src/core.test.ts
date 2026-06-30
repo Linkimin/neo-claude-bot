@@ -22,7 +22,7 @@ function fakeRun(events: RunnerEvent[], capture?: (p: any) => void) {
 describe('Core.handle', () => {
   it('claude provider (default): claude model, no env', async () => {
     let seen: any
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     settings.set('spike', { model: 'claude-opus-4-8', effort: 'high' })
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
     await core.handle('spike', 'do it', () => {})
@@ -33,7 +33,7 @@ describe('Core.handle', () => {
 
   it('fallback provider: routerai model + env + no thinking budget', async () => {
     let seen: any
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     settings.set('spike', { fallbackModel: 'deepseek/deepseek-v4-pro' })
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
     core.setProvider('spike', 'fallback')
@@ -44,14 +44,14 @@ describe('Core.handle', () => {
   })
 
   it('getProvider defaults to claude', () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([]))
     expect(core.getProvider('spike')).toBe('claude')
   })
 
   it('persists sessionId and resumes', async () => {
     const captures: any[] = []
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const sessions = new SessionStore(':memory:')
     const run = (events: RunnerEvent[]) =>
       async function* (p: any): AsyncGenerator<RunnerEvent> { captures.push(p); for (const e of events) yield e }
@@ -62,14 +62,14 @@ describe('Core.handle', () => {
   })
 
   it('throws on unknown project', async () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([]))
     await expect(core.handle('nope', 'x', () => {})).rejects.toThrow(/unknown project/)
   })
 
   it('passes onApproval through', async () => {
     let seen: any
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
     const onApproval = async () => ({ allow: true as const })
     await core.handle('spike', 'do it', () => {}, onApproval)
@@ -77,7 +77,7 @@ describe('Core.handle', () => {
   })
 
   it('isRunning false before/after', async () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([{ kind: 'assistant_text', text: 'hi' }]))
     expect(core.isRunning('spike')).toBe(false)
     await core.handle('spike', 'do it', () => {})
@@ -86,20 +86,20 @@ describe('Core.handle', () => {
 
   it('passes an AbortController to the runner', async () => {
     let seen: any
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([{ kind: 'assistant_text', text: 'hi' }], (p) => (seen = p)))
     await core.handle('spike', 'do it', () => {})
     expect(seen.abortController).toBeInstanceOf(AbortController)
   })
 
   it('interrupt returns false when nothing is running', () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const core = new Core(registry, settings, new SessionStore(':memory:'), fb, fakeRun([]))
     expect(core.interrupt('spike')).toBe(false)
   })
 
   it('interrupt() calls the run handle and stops the in-flight run', async () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     // Раннер ждёт, пока вызовут handle.interrupt(), затем отдаёт result:interrupt.
     const run = (p: any) => (async function* (): AsyncGenerator<RunnerEvent> {
       let stop!: () => void
@@ -118,7 +118,7 @@ describe('Core.handle', () => {
   })
 
   it('swallows post-interrupt transport error and synthesizes result:interrupted', async () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     // Раннер бросает (как kill закрывает транспорт) после вызова interrupt — без result.
     const run = (p: any) => (async function* (): AsyncGenerator<RunnerEvent> {
       let stop!: () => void
@@ -138,7 +138,7 @@ describe('Core.handle', () => {
   })
 
   it('synthesizes result:interrupted when the run ends without a result after interrupt', async () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     // Раннер завершает поток БЕЗ result (как SDK после kill) — без throw.
     const run = (p: any) => (async function* (): AsyncGenerator<RunnerEvent> {
       let stop!: () => void
@@ -157,7 +157,7 @@ describe('Core.handle', () => {
   })
 
   it('rethrows a genuine run error when no interrupt was requested', async () => {
-    const settings = SettingsStore.load(TMP)
+    const settings = new SettingsStore(':memory:')
     const run = () => (async function* (): AsyncGenerator<RunnerEvent> {
       throw new Error('boom')
     })()
