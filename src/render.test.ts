@@ -14,9 +14,9 @@ describe('render helpers', () => {
     expect(toolUseLine('Edit', { file_path: 'a.txt' })).toBe('🔧 Edit')
   })
   it('resultFooter for ok', () => {
-    expect(resultFooter({ kind: 'result', ok: true, sessionId: 's', costUsd: 0.1234, numTurns: 6 })).toBe('✅ готово · 6 turns · $0.1234')
+    expect(resultFooter({ kind: 'result', ok: true, interrupted: false, sessionId: 's', costUsd: 0.1234, numTurns: 6 })).toBe('✅ готово · 6 turns · $0.1234')
   })
   it('resultFooter for error', () => {
-    expect(resultFooter({ kind: 'result', ok: false, sessionId: 's', costUsd: 0.01, numTurns: 2 })).toBe('❌ ошибка · 2 turns · $0.0100')
+    expect(resultFooter({ kind: 'result', ok: false, interrupted: false, sessionId: 's', costUsd: 0.01, numTurns: 2 })).toBe('❌ ошибка · 2 turns · $0.0100')
   })
 })

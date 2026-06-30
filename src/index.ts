@@ -76,6 +76,7 @@ async function main() {
     { command: 'spend', description: 'Траты сегодня + баланс routerai' },
     { command: 'settings', description: 'Настройки: модель / effort / режим / провайдер' },
     { command: 'new', description: 'Новая сессия в этой теме' },
+    { command: 'stop', description: 'Прервать текущий запрос' },
     { command: 'setup', description: 'Создать темы по проектам' },
     { command: 'start', description: 'Помощь' },
   ])

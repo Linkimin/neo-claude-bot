@@ -43,11 +43,16 @@ describe('normalize', () => {
 
   it('maps result:success to ok result', () => {
     const out = normalize({ type: 'result', subtype: 'success', is_error: false, session_id: 's1', total_cost_usd: 0.07, num_turns: 6 })
-    expect(out).toEqual([{ kind: 'result', ok: true, sessionId: 's1', costUsd: 0.07, numTurns: 6 }])
+    expect(out).toEqual([{ kind: 'result', ok: true, interrupted: false, sessionId: 's1', costUsd: 0.07, numTurns: 6 }])
   })
 
   it('maps error result to not-ok', () => {
     const out = normalize({ type: 'result', subtype: 'error_during_execution', is_error: true, session_id: 's1', total_cost_usd: 0.01, num_turns: 2 })
-    expect(out).toEqual([{ kind: 'result', ok: false, sessionId: 's1', costUsd: 0.01, numTurns: 2 }])
+    expect(out).toEqual([{ kind: 'result', ok: false, interrupted: false, sessionId: 's1', costUsd: 0.01, numTurns: 2 }])
+  })
+
+  it('flags interrupted result (subtype interrupt)', () => {
+    const out = normalize({ type: 'result', subtype: 'interrupt', is_error: true, session_id: 's1', total_cost_usd: 0.02, num_turns: 1 })
+    expect(out).toEqual([{ kind: 'result', ok: false, interrupted: true, sessionId: 's1', costUsd: 0.02, numTurns: 1 }])
   })
 })

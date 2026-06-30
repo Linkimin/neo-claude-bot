@@ -32,6 +32,11 @@ export function normalize(msg: any): RunnerEvent[] {
       return [{
         kind: 'result',
         ok: msg.is_error === false && msg.subtype === 'success',
+        interrupted:
+          msg.subtype === 'interrupt' ||
+          msg.is_interrupt === true ||
+          msg.terminal_reason === 'aborted_streaming' ||
+          msg.terminal_reason === 'aborted_tools',
         sessionId: msg.session_id,
         costUsd: msg.total_cost_usd ?? 0,
         numTurns: msg.num_turns ?? 0,

@@ -7,6 +7,11 @@ import { normalize } from './normalize.ts'
 // Колбэк бота: спросить у пользователя разрешение на инструмент.
 export type ApprovalFn = (toolName: string, input: unknown) => Promise<ApprovalDecision>
 
+// Дескриптор живого запроса — для интерактивного прерывания текущего хода.
+export interface RunHandle {
+  interrupt: () => Promise<void>
+}
+
 export interface RunParams {
   cwd: string
   prompt: string
@@ -17,6 +22,8 @@ export interface RunParams {
   abortController?: AbortController
   resume?: string
   onApproval?: ApprovalFn
+  // Вызывается один раз сразу после создания запроса — даёт доступ к .interrupt().
+  onQuery?: (h: RunHandle) => void
 }
 
 // Тип функции запуска — для подмены в тестах core (DI).
@@ -36,8 +43,16 @@ export async function* runPrompt(p: RunParams, q: QueryFn = query): AsyncGenerat
         }
       : undefined
 
+  // Streaming-input режим (prompt как AsyncIterable) — обязателен, чтобы был доступен
+  // control-request .interrupt() для интерактивной остановки текущего хода.
+  // Со строковым prompt SDK поддерживает только abortController (graceful-close, ~2с),
+  // которого недостаточно: короткий ход успевает доработать.
+  async function* input(): AsyncIterable<any> {
+    yield { type: 'user', message: { role: 'user', content: p.prompt }, parent_tool_use_id: null }
+  }
+
   const iter = q({
-    prompt: p.prompt,
+    prompt: input(),
     options: {
       cwd: p.cwd,
       permissionMode: p.permissionMode,
@@ -52,6 +67,8 @@ export async function* runPrompt(p: RunParams, q: QueryFn = query): AsyncGenerat
       ...(canUseTool ? { canUseTool } : {}),
     },
   })
+
+  p.onQuery?.({ interrupt: () => iter.interrupt() })
 
   for await (const msg of iter) {
     for (const ev of normalize(msg)) yield ev

@@ -5,4 +5,4 @@ export type RunnerEvent =
   | { kind: 'tool_use'; name: string; input: unknown }
   | { kind: 'status'; category: string; detail: string }
   | { kind: 'rate_limit'; rateLimitType: string; utilization: number; resetsAt: number; status: string }
-  | { kind: 'result'; ok: boolean; sessionId: string; costUsd: number; numTurns: number }
+  | { kind: 'result'; ok: boolean; interrupted: boolean; sessionId: string; costUsd: number; numTurns: number }

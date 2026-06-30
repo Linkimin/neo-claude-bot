@@ -157,6 +157,7 @@ export function createBot(
 
     let limitBlocked = false
     let blockedResetsAt = 0
+    let stopped = false
     try {
       await core.handle(project, prompt, async (ev) => {
         if (ev.kind === 'assistant_text') {
@@ -169,7 +170,12 @@ export function createBot(
           await send(toolUseLine(ev.name, ev.input))
         } else if (ev.kind === 'result') {
           if (answerBuf) await renderAnswer(true)
-          if (!limitBlocked) await send(resultFooter(ev))
+          if (ev.interrupted) {
+            if (!stopped) await send('⏹ Остановлено.')
+            stopped = true
+          } else if (!limitBlocked) {
+            await send(resultFooter(ev))
+          }
           spend.add(project, core.getProvider(project), ev.costUsd)
           const day = todayStr()
           if (config.spendAlertUsd !== null && spendAlertedDay !== day && spend.todayTotal(day) >= config.spendAlertUsd) {
@@ -192,7 +198,7 @@ export function createBot(
     } catch (err) {
       const aborted = err instanceof Error && (err.name === 'AbortError' || /abort/i.test(err.message))
       if (aborted) {
-        await send('⏹ Остановлено.')
+        if (!stopped) await send('⏹ Остановлено.')
       } else {
         const msg = err instanceof Error ? err.message : String(err)
         log.error('[run error]', project, msg)
