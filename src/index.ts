@@ -23,11 +23,18 @@ async function main() {
   const config = loadConfig(process.env)
 
   // Разовый ренейм БД под бренд neo-claude-bot (data/ в gitignore, переносим существующие данные).
+  // Отказоустойчиво: если старый файл временно залочен (напр. остался прежний процесс),
+  // НЕ валим бота — работаем со старой БД, ренейм случится при следующем чистом старте.
   const oldDbPath = resolve('data/claud-bot.sqlite')
-  const dbPath = resolve('data/neo-claude-bot.sqlite')
-  if (existsSync(oldDbPath) && !existsSync(dbPath)) {
-    renameSync(oldDbPath, dbPath)
-    log.info('БД переименована: claud-bot.sqlite -> neo-claude-bot.sqlite')
+  let dbPath = resolve('data/neo-claude-bot.sqlite')
+  if (!existsSync(dbPath) && existsSync(oldDbPath)) {
+    try {
+      renameSync(oldDbPath, dbPath)
+      log.info('БД переименована: claud-bot.sqlite -> neo-claude-bot.sqlite')
+    } catch (e) {
+      dbPath = oldDbPath
+      log.error('Ренейм БД не удался, использую claud-bot.sqlite:', e instanceof Error ? e.message : String(e))
+    }
   }
 
   const registry = Registry.fromFile(resolve('config/projects.json'))
