@@ -1,24 +1,23 @@
 import { describe, it, expect } from 'vitest'
 import { Registry } from './registry.ts'
+import { ProjectStore } from './projectStore.ts'
 
-const projects = [
-  { name: 'spike', dir: 'tmp/spike-project', defaultMode: 'bypassPermissions' as const },
-  { name: 'game', dir: 'tmp/game', defaultMode: 'acceptEdits' as const },
-]
+function ready(): { store: ProjectStore; reg: Registry } {
+  const store = new ProjectStore(':memory:')
+  store.add({ slug: 'foo', label: 'Foo', dir: 'D:/x/foo', defaultMode: 'acceptEdits', threadId: 1 })
+  store.add({ slug: 'bar', label: 'Bar', dir: 'D:/x/bar', defaultMode: 'default', threadId: 2 })
+  return { store, reg: new Registry(store) }
+}
 
-describe('Registry', () => {
-  it('returns a project by name', () => {
-    const r = new Registry(projects)
-    expect(r.get('game').dir).toBe('tmp/game')
+describe('Registry (adapter)', () => {
+  it('names() returns slugs in store order', () => {
+    expect(ready().reg.names()).toEqual(['foo', 'bar'])
   })
-
-  it('lists all project names', () => {
-    const r = new Registry(projects)
-    expect(r.names()).toEqual(['spike', 'game'])
+  it('get(slug) returns Project shape consumed by Core/bot', () => {
+    const p = ready().reg.get('foo')
+    expect(p).toEqual({ name: 'foo', dir: 'D:/x/foo', defaultMode: 'acceptEdits' })
   })
-
-  it('throws on unknown project', () => {
-    const r = new Registry(projects)
-    expect(() => r.get('nope')).toThrow(/unknown project: nope/)
+  it('get throws on unknown', () => {
+    expect(() => ready().reg.get('nope')).toThrow(/unknown project/)
   })
 })

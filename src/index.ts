@@ -5,6 +5,7 @@ import { run } from '@grammyjs/runner'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { loadConfig } from './config.ts'
 import { Registry } from './registry.ts'
+import { ProjectStore } from './projectStore.ts'
 import { Core } from './core.ts'
 import { TopicMap } from './topics.ts'
 import { SettingsStore } from './settingsStore.ts'
@@ -37,7 +38,16 @@ async function main() {
     }
   }
 
-  const registry = Registry.fromFile(resolve('config/projects.json'))
+  const projects = new ProjectStore(dbPath)
+  ProjectStore.migrateFromJson(projects, {
+    projectsJson: resolve('config/projects.json'),
+    topicsJson: resolve('data/topics.json'),
+  })
+  if (projects.roots().length === 0 && config.projectRoots.length > 0) {
+    for (const p of config.projectRoots) projects.addRoot(resolve(p))
+    log.info('Корни проектов посеяны из PROJECT_ROOTS:', config.projectRoots.join('; '))
+  }
+  const registry = new Registry(projects)
   const topics = new TopicMap(dbPath)
   TopicMap.migrateFromJson(topics, resolve('data/topics.json'))
   const settings = new SettingsStore(dbPath)
@@ -108,7 +118,7 @@ async function main() {
     log.info('Завершение…')
     try { await handle.stop() } catch { /* ignore */ }
     ccr?.stop()
-    sessions.close(); limits.close(); runs.close(); spend.close()
+    sessions.close(); limits.close(); runs.close(); spend.close(); projects.close(); topics.close(); settings.close()
     process.exit(0)
   }
   process.once('SIGINT', shutdown)

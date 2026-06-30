@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { rmSync, existsSync } from 'node:fs'
 import { Core } from './core.ts'
 import { Registry } from './registry.ts'
+import { ProjectStore } from './projectStore.ts'
 import { SettingsStore } from './settingsStore.ts'
 import { SessionStore } from './sessionStore.ts'
 import type { RunnerEvent } from './events.ts'
@@ -9,7 +10,9 @@ import type { RunnerEvent } from './events.ts'
 const TMP = 'tmp/core-settings-test.json'
 afterEach(() => { if (existsSync(TMP)) rmSync(TMP) })
 
-const registry = new Registry([{ name: 'spike', dir: 'tmp/spike-project', defaultMode: 'bypassPermissions' }])
+const projectStore = new ProjectStore(':memory:')
+projectStore.add({ slug: 'spike', label: 'spike', dir: 'tmp/spike-project', defaultMode: 'bypassPermissions', threadId: null })
+const registry = new Registry(projectStore)
 const fb = { ccrUrl: 'http://localhost:3456', authToken: 'k' }
 
 function fakeRun(events: RunnerEvent[], capture?: (p: any) => void) {
