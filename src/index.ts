@@ -38,7 +38,8 @@ async function main() {
   }
 
   const registry = Registry.fromFile(resolve('config/projects.json'))
-  const topics = TopicMap.load(resolve('data/topics.json'))
+  const topics = new TopicMap(dbPath)
+  TopicMap.migrateFromJson(topics, resolve('data/topics.json'))
   const settings = SettingsStore.load(resolve('data/settings.json'))
   const sessions = new SessionStore(dbPath)
   const limits = new LimitsStore(dbPath)

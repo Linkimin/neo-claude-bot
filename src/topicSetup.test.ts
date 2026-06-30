@@ -1,10 +1,6 @@
-import { describe, it, expect, afterEach } from 'vitest'
-import { rmSync, existsSync } from 'node:fs'
+import { describe, it, expect } from 'vitest'
 import { ensureTopics, type TopicApi } from './topicSetup.ts'
 import { TopicMap } from './topics.ts'
-
-const TMP = 'tmp/topicsetup-test.json'
-afterEach(() => { if (existsSync(TMP)) rmSync(TMP) })
 
 // Фейковое API: считает вызовы и выдаёт инкрементные thread_id.
 function fakeApi() {
@@ -19,7 +15,7 @@ function fakeApi() {
 describe('ensureTopics', () => {
   it('creates a topic for each project missing a mapping', async () => {
     const { api, calls } = fakeApi()
-    const topics = TopicMap.load(TMP)
+    const topics = new TopicMap(':memory:')
     const created = await ensureTopics(api, -100, ['spike', 'game'], topics)
 
     expect(created).toEqual(['spike', 'game'])
@@ -30,7 +26,7 @@ describe('ensureTopics', () => {
 
   it('skips projects that already have a mapping', async () => {
     const { api, calls } = fakeApi()
-    const topics = TopicMap.load(TMP)
+    const topics = new TopicMap(':memory:')
     topics.set('spike', 777)
     const created = await ensureTopics(api, -100, ['spike', 'game'], topics)
 
