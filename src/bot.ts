@@ -20,6 +20,15 @@ import { renderSpend } from './spendView.ts'
 import { getRouteraiBalance } from './routeraiBalance.ts'
 import { RunStore } from './runStore.ts'
 import { parseRecoveryCallback } from './recovery.ts'
+import { ProjectStore } from './projectStore.ts'
+import { listSubdirs, resolveInsideRoot } from './dirBrowser.ts'
+import { toSlug, dedupeSlug } from './slug.ts'
+import {
+  startWizard, selectRoot, enterSegment, goUp, setPage, selectCurrent, awaitNewFolder,
+  setLabel, setMode, PAGE_SIZE, type WizardState,
+} from './projectWizard.ts'
+import { mkdirSync, existsSync } from 'node:fs'
+import { basename, resolve } from 'node:path'
 import { log } from './logger.ts'
 
 const DEFAULT_PROJECT = 'spike' // маршрут для личного чата (запасной)
@@ -54,9 +63,14 @@ export function createBot(
   limits: LimitsStore,
   runs: RunStore,
   spend: SpendStore,
+  projects: ProjectStore,
 ): Bot {
   const bot = new Bot(config.botToken)
   const approvals = new ApprovalRegistry()
+
+  // Состояние мастера добавления проекта (in-memory, один активный на юзера).
+  const wizards = new Map<number, WizardState>()
+  const pending = new Map<number, { kind: 'wizard:newfolder' | 'proj:rename'; slug?: string }>()
 
   bot.catch((err) => {
     log.error('bot.catch:', err.error instanceof Error ? err.error.message : String(err.error))
@@ -228,6 +242,91 @@ export function createBot(
     }
   }
 
+  // ── Мастер добавления проекта: рендеры экранов ──
+  function renderPickRoot(roots: string[]): { text: string; kb: InlineKeyboard } {
+    const kb = new InlineKeyboard()
+    roots.forEach((r, i) => { kb.text(r, `wiz:root:${i}`).row() })
+    kb.text('✖️ Отмена', 'wiz:cancel')
+    return { text: 'Выбери корень:', kb }
+  }
+
+  function renderBrowse(state: Extract<WizardState, { stage: 'browse' }>): { text: string; kb: InlineKeyboard } {
+    let page
+    try { page = listSubdirs(state.currentPath, state.page, PAGE_SIZE) }
+    catch (e) { return { text: `Ошибка чтения: ${e instanceof Error ? e.message : String(e)}`, kb: new InlineKeyboard().text('✖️ Отмена', 'wiz:cancel') } }
+    const kb = new InlineKeyboard()
+    page.items.forEach((name, i) => { kb.text(`📁 ${name}`, `wiz:enter:${i}`).row() })
+    const totalPages = Math.max(1, Math.ceil(page.total / PAGE_SIZE))
+    if (totalPages > 1) {
+      if (state.page > 0) kb.text('◀️', 'wiz:page:prev')
+      kb.text(`${state.page + 1}/${totalPages}`, 'wiz:nop')
+      if (state.page < totalPages - 1) kb.text('▶️', 'wiz:page:next')
+      kb.row()
+    }
+    const atRoot = resolve(state.currentPath) === resolve(state.rootPath)
+    if (!atRoot) kb.text('⬆️ Вверх', 'wiz:up').row()
+    kb.text('✅ Выбрать эту', 'wiz:select').row()
+    kb.text('➕ Новая папка…', 'wiz:newfolder').row()
+    if (state.roots.length > 1) kb.text('🏠 Сменить корень', 'wiz:home')
+    kb.text('✖️ Отмена', 'wiz:cancel')
+    const header = state.awaitingNewFolder
+      ? `📁 ${state.currentPath}\n\nПришли имя новой папки сообщением.`
+      : `📁 ${state.currentPath}\n(папок: ${page.total})`
+    return { text: header, kb }
+  }
+
+  function renderAwaitLabel(dir: string): { text: string; kb: InlineKeyboard } {
+    const def = basename(dir)
+    return {
+      text: `Папка: ${dir}\n\nКак назвать проект? Пришли имя сообщением или жми кнопку.`,
+      kb: new InlineKeyboard().text(`Назвать «${def}»`, 'wiz:labeldef').text('✖️ Отмена', 'wiz:cancel'),
+    }
+  }
+
+  function renderPickMode(): { text: string; kb: InlineKeyboard } {
+    return {
+      text: 'Режим по умолчанию:',
+      kb: new InlineKeyboard()
+        .text('acceptEdits', 'wiz:mode:acceptEdits')
+        .text('default', 'wiz:mode:default')
+        .row()
+        .text('✖️ Отмена', 'wiz:cancel'),
+    }
+  }
+
+  async function showWizard(chatId: number, state: WizardState): Promise<void> {
+    let view: { text: string; kb: InlineKeyboard } | undefined
+    if (state.stage === 'pickRoot') view = renderPickRoot(state.roots)
+    else if (state.stage === 'browse') view = renderBrowse(state)
+    else if (state.stage === 'awaitLabel') view = renderAwaitLabel(state.dir)
+    else if (state.stage === 'pickMode') view = renderPickMode()
+    if (!view) return
+    await bot.api.sendMessage(chatId, view.text, { reply_markup: view.kb })
+  }
+
+  async function finishWizard(chatId: number, userId: number, st: Extract<WizardState, { stage: 'done' }>): Promise<void> {
+    wizards.delete(userId); pending.delete(userId)
+    if (projects.isDirTaken(st.dir)) {
+      await bot.api.sendMessage(chatId, `Эта папка уже привязана к проекту: ${st.dir}`)
+      return
+    }
+    const slug = dedupeSlug(toSlug(st.label), new Set(projects.list().map((p) => p.slug)))
+    let threadId: number
+    try {
+      const t = await bot.api.createForumTopic(config.groupId, st.label)
+      threadId = t.message_thread_id
+    } catch (e) {
+      await bot.api.sendMessage(chatId, `Не удалось создать топик: ${e instanceof Error ? e.message : String(e)}. Проект не сохранён.`)
+      return
+    }
+    projects.add({ slug, label: st.label, dir: st.dir, defaultMode: st.defaultMode, threadId })
+    topics.set(slug, threadId)
+    await bot.api.sendMessage(
+      chatId,
+      `✅ Проект создан\n• имя: ${st.label}\n• slug: ${slug}\n• папка: ${st.dir}\n• режим: ${st.defaultMode}\n• топик: ${threadId}`,
+    )
+  }
+
   // Auth.
   bot.use(async (ctx, next) => {
     if (isAllowed(ctx.from?.id, config.allowedUserId)) return next()
@@ -269,6 +368,48 @@ export function createBot(
     if (!project) { await ctx.reply('Эта тема не привязана к проекту.'); return }
     sessions.clear(project)
     await ctx.reply(`🆕 ${project}: начнётся новая сессия.`, threadId ? { message_thread_id: threadId } : {})
+  })
+
+  bot.command('addproject', async (ctx) => {
+    const roots = projects.roots().map((r) => r.path)
+    if (roots.length === 0) { await ctx.reply('Нет корней. Добавь: /roots add <абсолютный путь>'); return }
+    const state = startWizard(roots)
+    wizards.set(ctx.from!.id, state)
+    pending.delete(ctx.from!.id)
+    await showWizard(ctx.chat!.id, state)
+  })
+
+  bot.command('projects', async (ctx) => {
+    const rows = projects.list()
+    if (rows.length === 0) { await ctx.reply('Проектов нет. /addproject'); return }
+    const kb = new InlineKeyboard()
+    for (const p of rows) {
+      const tag = core.isRunning(p.slug) ? ' ▶️' : ''
+      kb.text(`${p.label}${tag}`, 'wiz:nop').row()
+      kb.text('✏️', `proj:rename:${p.slug}`).text('🗑', `proj:del:${p.slug}`).row()
+    }
+    kb.text('➕ Добавить проект', 'proj:add')
+    await ctx.reply('Проекты:', { reply_markup: kb })
+  })
+
+  bot.command('roots', async (ctx) => {
+    const arg = (ctx.match ?? '').toString().trim()
+    if (arg.startsWith('add ')) {
+      const path = resolve(arg.slice(4).trim())
+      if (!existsSync(path)) { await ctx.reply(`Не существует: ${path}`); return }
+      projects.addRoot(path)
+      await ctx.reply(`✅ Корень добавлен: ${path}`)
+      return
+    }
+    if (arg.startsWith('rm ')) {
+      const path = resolve(arg.slice(3).trim())
+      projects.removeRoot(path)
+      await ctx.reply(`🗑 Корень удалён: ${path}`)
+      return
+    }
+    const list = projects.roots()
+    if (list.length === 0) { await ctx.reply('Корней нет. Добавь: /roots add <абсолютный путь>'); return }
+    await ctx.reply('Корни:\n' + list.map((r) => `• ${r.path}`).join('\n'))
   })
 
   bot.command('stop', async (ctx) => {
@@ -335,6 +476,81 @@ export function createBot(
 
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery.data
+    const userId = ctx.from.id
+    const chatId = ctx.chat?.id ?? userId
+
+    // ── Мастер добавления / CRUD проектов ──
+    if (data === 'proj:add') {
+      const roots = projects.roots().map((r) => r.path)
+      if (roots.length === 0) { await ctx.answerCallbackQuery({ text: 'Нет корней (/roots add)', show_alert: true }); return }
+      const st = startWizard(roots)
+      wizards.set(userId, st); pending.delete(userId)
+      await ctx.answerCallbackQuery()
+      await showWizard(chatId, st); return
+    }
+
+    if (data.startsWith('wiz:')) {
+      await ctx.answerCallbackQuery()
+      const st = wizards.get(userId)
+      if (!st) return
+      if (data === 'wiz:cancel') { wizards.delete(userId); pending.delete(userId); await bot.api.sendMessage(chatId, '✖️ Отменено.'); return }
+      if (data === 'wiz:nop') return
+      if (data === 'wiz:home') { const next = startWizard(projects.roots().map((r) => r.path)); wizards.set(userId, next); await showWizard(chatId, next); return }
+      if (st.stage === 'pickRoot' && data.startsWith('wiz:root:')) {
+        const next = selectRoot(st, Number(data.slice('wiz:root:'.length))); wizards.set(userId, next); await showWizard(chatId, next); return
+      }
+      if (st.stage === 'browse') {
+        if (data === 'wiz:up') { const next = goUp(st, (seg) => resolveInsideRoot(st.rootPath, st.currentPath, seg)); wizards.set(userId, next); await showWizard(chatId, next); return }
+        if (data === 'wiz:select') { const next = selectCurrent(st); wizards.set(userId, next); await showWizard(chatId, next); return }
+        if (data === 'wiz:newfolder') { const next = awaitNewFolder(st); wizards.set(userId, next); pending.set(userId, { kind: 'wizard:newfolder' }); await showWizard(chatId, next); return }
+        if (data === 'wiz:page:prev') { const next = setPage(st, st.page - 1); wizards.set(userId, next); await showWizard(chatId, next); return }
+        if (data === 'wiz:page:next') { const next = setPage(st, st.page + 1); wizards.set(userId, next); await showWizard(chatId, next); return }
+        if (data.startsWith('wiz:enter:')) {
+          const page = listSubdirs(st.currentPath, st.page, PAGE_SIZE)
+          const name = page.items[Number(data.slice('wiz:enter:'.length))]
+          if (!name) return
+          const next = enterSegment(st, name, (seg) => resolveInsideRoot(st.rootPath, st.currentPath, seg))
+          wizards.set(userId, next); await showWizard(chatId, next); return
+        }
+        return
+      }
+      if (st.stage === 'awaitLabel' && data === 'wiz:labeldef') {
+        const next = setLabel(st, basename(st.dir)); wizards.set(userId, next); await showWizard(chatId, next); return
+      }
+      if (st.stage === 'pickMode' && data.startsWith('wiz:mode:')) {
+        const next = setMode(st, data.slice('wiz:mode:'.length) as 'acceptEdits' | 'default')
+        if (next.stage === 'done') await finishWizard(chatId, userId, next)
+        return
+      }
+      return
+    }
+
+    if (data.startsWith('proj:del:yes:')) {
+      const slug = data.slice('proj:del:yes:'.length)
+      await ctx.answerCallbackQuery()
+      if (core.isRunning(slug)) { await bot.api.sendMessage(chatId, `«${slug}» сейчас выполняется — сначала /stop.`); return }
+      const row = projects.get(slug)
+      projects.remove(slug); topics.remove(slug); settings.remove(slug); sessions.clear(slug)
+      if (row?.threadId) { try { await bot.api.closeForumTopic(config.groupId, row.threadId) } catch { /* ignore */ } }
+      await ctx.editMessageText(`🗑 Удалено: ${row?.label ?? slug}`).catch(() => {})
+      return
+    }
+    if (data.startsWith('proj:del:no:')) { await ctx.answerCallbackQuery(); await ctx.editMessageText('Отмена удаления.').catch(() => {}); return }
+    if (data.startsWith('proj:del:')) {
+      const slug = data.slice('proj:del:'.length)
+      const row = projects.get(slug)
+      await ctx.answerCallbackQuery()
+      const kb = new InlineKeyboard().text('Да, удалить', `proj:del:yes:${slug}`).text('Нет', `proj:del:no:${slug}`)
+      await bot.api.sendMessage(chatId, `Удалить «${row?.label ?? slug}»? Файлы на диске останутся.`, { reply_markup: kb })
+      return
+    }
+    if (data.startsWith('proj:rename:')) {
+      const slug = data.slice('proj:rename:'.length)
+      pending.set(userId, { kind: 'proj:rename', slug })
+      await ctx.answerCallbackQuery()
+      await bot.api.sendMessage(chatId, `Пришли новое имя для «${slug}».`)
+      return
+    }
 
     if (data.startsWith('stop:')) {
       const ok = core.interrupt(data.slice(5))
@@ -393,6 +609,39 @@ export function createBot(
 
   bot.on('message:text', async (ctx) => {
     const prompt = ctx.message.text
+
+    // ── Текстовый ввод для мастера/CRUD (имеет приоритет над промптом) ──
+    const userId = ctx.from.id
+    const exp = pending.get(userId)
+    if (exp) {
+      const text = ctx.message.text.trim()
+      pending.delete(userId)
+      if (exp.kind === 'wizard:newfolder') {
+        const st = wizards.get(userId)
+        if (!st || st.stage !== 'browse') return
+        const target = resolveInsideRoot(st.rootPath, st.currentPath, text)
+        if (!target) { await ctx.reply('Имя недопустимо.'); return }
+        try { mkdirSync(target, { recursive: false }) }
+        catch (e) { await ctx.reply(`Не создал: ${e instanceof Error ? e.message : String(e)}`); return }
+        const next = enterSegment(st, text, () => target)
+        wizards.set(userId, next); await showWizard(ctx.chat.id, next); return
+      }
+      if (exp.kind === 'proj:rename' && exp.slug) {
+        const row = projects.get(exp.slug)
+        if (!row) { await ctx.reply('Проект не найден.'); return }
+        projects.rename(exp.slug, text)
+        if (row.threadId) { try { await bot.api.editForumTopic(config.groupId, row.threadId, { name: text }) } catch { /* ignore */ } }
+        await ctx.reply(`✅ ${exp.slug} → «${text}»`)
+        return
+      }
+    }
+
+    const wst = wizards.get(userId)
+    if (wst?.stage === 'awaitLabel') {
+      const label = ctx.message.text.trim()
+      if (label) { const next = setLabel(wst, label); wizards.set(userId, next); await showWizard(ctx.chat.id, next); return }
+    }
+
     if (prompt.startsWith('/')) return
 
     const threadId = ctx.message.message_thread_id

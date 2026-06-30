@@ -59,7 +59,7 @@ async function main() {
 
   const fallback = config.fallback ? { ccrUrl: config.fallback.ccrUrl, authToken: config.fallback.apiKey } : null
   const core = new Core(registry, settings, sessions, fallback)
-  const bot = createBot(config, core, registry, topics, settings, sessions, limits, runs, spend)
+  const bot = createBot(config, core, registry, topics, settings, sessions, limits, runs, spend, projects)
 
   bot.api.config.use(autoRetry())
 
@@ -106,6 +106,9 @@ async function main() {
     { command: 'settings', description: 'Настройки: модель / effort / режим / провайдер' },
     { command: 'new', description: 'Новая сессия в этой теме' },
     { command: 'stop', description: 'Прервать текущий запрос' },
+    { command: 'projects', description: 'Список проектов (добавить/переименовать/удалить)' },
+    { command: 'addproject', description: 'Добавить проект' },
+    { command: 'roots', description: 'Корни для обзора папок' },
     { command: 'setup', description: 'Создать темы по проектам' },
     { command: 'start', description: 'Помощь' },
   ])
