@@ -1,4 +1,4 @@
-# claud-bot
+# Neo Claude
 
 [English](README.md) · **Русский**
 
@@ -40,7 +40,7 @@ Telegram (телефон)
 - **Бот** (`src/bot.ts`) — тонкий Telegram-слой: маршрутизация, клавиатуры, апрувы, команды.
 - **Core** (`src/core.ts`) — оркестрирует прогон, владеет выбором провайдера и прерыванием.
 - **runner** (`src/runner.ts`) — вызывает Agent SDK в режиме streaming-input, нормализует события, подключает колбэк апрува.
-- **Сторы** — SQLite (`data/claud-bot.sqlite`) для сессий, лимитов, прогонов и трат.
+- **Сторы** — SQLite (`data/neo-claude-bot.sqlite`) для сессий, лимитов, прогонов и трат.
 - **Фолбэк** — `CcrProcess` поднимает локальный прокси claude-code-router, который мостит OpenAI-формат провайдера в протокол Anthropic.
 
 ## Требования
@@ -107,12 +107,12 @@ npm start                 # запуск на переднем плане
 
 ```powershell
 npm run install-service                  # установить (старт при загрузке, авто-рестарт)
-Start-ScheduledTask -TaskName ClaudBot   # запустить сейчас (и при загрузке)
+Start-ScheduledTask -TaskName NeoClaudeBot   # запустить сейчас (и при загрузке)
 npm run uninstall-service                # удалить
 ```
 
 - Работает **до входа в систему** под твоим аккаунтом (S4U) — Claude-авторизация работает.
-- Лог: `data\bot.log`. Статус: `Get-ScheduledTask -TaskName ClaudBot`.
+- Лог: `data\bot.log`. Статус: `Get-ScheduledTask -TaskName NeoClaudeBot`.
 - Супервизор-обёртка перезапускает бота, если он завершился.
 
 ## Разработка

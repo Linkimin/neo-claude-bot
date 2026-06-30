@@ -1,4 +1,4 @@
-# claud-bot
+# Neo Claude
 
 **English** · [Русский](README.ru.md)
 
@@ -40,7 +40,7 @@ grammY bot  ──►  Core  ──►  runner  ──►  @anthropic-ai/claude-
 - **Bot** (`src/bot.ts`) — thin Telegram layer: routing, keyboards, approvals, commands.
 - **Core** (`src/core.ts`) — orchestrates a run, owns provider selection and interrupts.
 - **runner** (`src/runner.ts`) — calls the Agent SDK in streaming-input mode, normalizes events, wires the approval callback.
-- **Stores** — SQLite (`data/claud-bot.sqlite`) for sessions, limits, runs and spend.
+- **Stores** — SQLite (`data/neo-claude-bot.sqlite`) for sessions, limits, runs and spend.
 - **Failover** — `CcrProcess` manages a local claude-code-router proxy that bridges an OpenAI-format provider to the Anthropic protocol.
 
 ## Requirements
@@ -107,12 +107,12 @@ From an **Administrator** PowerShell, in the project directory:
 
 ```powershell
 npm run install-service                  # install (start at boot, auto-restart)
-Start-ScheduledTask -TaskName ClaudBot   # start now (also starts on boot)
+Start-ScheduledTask -TaskName NeoClaudeBot   # start now (also starts on boot)
 npm run uninstall-service                # remove
 ```
 
 - Runs **before login** under your account (S4U), so Claude authentication works.
-- Log: `data\bot.log`. Status: `Get-ScheduledTask -TaskName ClaudBot`.
+- Log: `data\bot.log`. Status: `Get-ScheduledTask -TaskName NeoClaudeBot`.
 - A supervisor wrapper respawns the bot if it exits.
 
 ## Development

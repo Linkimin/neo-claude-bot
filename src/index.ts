@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { resolve } from 'node:path'
+import { existsSync, renameSync } from 'node:fs'
 import { run } from '@grammyjs/runner'
 import { autoRetry } from '@grammyjs/auto-retry'
 import { loadConfig } from './config.ts'
@@ -20,13 +21,22 @@ import { log } from './logger.ts'
 
 async function main() {
   const config = loadConfig(process.env)
+
+  // Разовый ренейм БД под бренд neo-claude-bot (data/ в gitignore, переносим существующие данные).
+  const oldDbPath = resolve('data/claud-bot.sqlite')
+  const dbPath = resolve('data/neo-claude-bot.sqlite')
+  if (existsSync(oldDbPath) && !existsSync(dbPath)) {
+    renameSync(oldDbPath, dbPath)
+    log.info('БД переименована: claud-bot.sqlite -> neo-claude-bot.sqlite')
+  }
+
   const registry = Registry.fromFile(resolve('config/projects.json'))
   const topics = TopicMap.load(resolve('data/topics.json'))
   const settings = SettingsStore.load(resolve('data/settings.json'))
-  const sessions = new SessionStore(resolve('data/claud-bot.sqlite'))
-  const limits = new LimitsStore(resolve('data/claud-bot.sqlite'))
-  const runs = new RunStore(resolve('data/claud-bot.sqlite'))
-  const spend = new SpendStore(resolve('data/claud-bot.sqlite'))
+  const sessions = new SessionStore(dbPath)
+  const limits = new LimitsStore(dbPath)
+  const runs = new RunStore(dbPath)
+  const spend = new SpendStore(dbPath)
 
   const fallback = config.fallback ? { ccrUrl: config.fallback.ccrUrl, authToken: config.fallback.apiKey } : null
   const core = new Core(registry, settings, sessions, fallback)

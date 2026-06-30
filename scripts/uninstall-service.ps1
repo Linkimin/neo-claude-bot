@@ -1,4 +1,4 @@
 $ErrorActionPreference = 'Stop'
-Stop-ScheduledTask -TaskName 'ClaudBot' -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName 'ClaudBot' -Confirm:$false
-Write-Host 'ClaudBot service removed.'
+Stop-ScheduledTask -TaskName 'NeoClaudeBot' -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'NeoClaudeBot' -Confirm:$false
+Write-Host 'NeoClaudeBot service removed.'
