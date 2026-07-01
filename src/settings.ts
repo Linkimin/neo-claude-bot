@@ -12,11 +12,11 @@ export interface ProjectSettings {
 
 export const MODELS = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
 ] as const
 
-export const DEFAULT_MODEL = 'claude-sonnet-4-6'
+export const DEFAULT_MODEL = 'claude-sonnet-5'
 
 // Модели routerai для фолбэка (id — формат routerai, подтверждены спайком).
 export const FALLBACK_MODELS = [

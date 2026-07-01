@@ -6,7 +6,7 @@ import {
 
 describe('settings constants', () => {
   it('has 3 models and a valid default', () => {
-    expect(MODELS.map((m) => m.id)).toEqual(['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'])
+    expect(MODELS.map((m) => m.id)).toEqual(['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'])
     expect(MODELS.some((m) => m.id === DEFAULT_MODEL)).toBe(true)
   })
   it('maps every effort level to a thinking budget', () => {
